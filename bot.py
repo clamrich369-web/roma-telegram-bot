@@ -381,14 +381,52 @@ async def delivered_order(call: types.CallbackQuery):
     await call.message.edit_text("✅ سفارش با موفقیت بسته شد")
     await call.answer("سفارش بسته شد")
     
-# ================= ADMIN REPORT =================
-@dp.message_handler(lambda m: m.text == "📊 گزارش ادمین")
-async def report(message):
-    await message.answer(
-        f"""📊 گزارش
-👥 کاربران: {len(users)}
-🛒 سفارش‌های فعال: {len(orders)}"""
+@dp.callback_query_handler(lambda c: c.data.startswith("food_ready:"))
+async def food_ready(call: types.CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+
+    uid = int(call.data.split(":")[1])
+
+    await bot.send_message(
+        uid,
+        "🍝 غذای شما آماده است\n"
+        "🙏 منتظر حضور شما هستیم"
     )
+
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton(
+            "📦 سفارش تحویل شد",
+            callback_data=f"delivered:{uid}"
+        )
+    )
+
+    await call.message.edit_text(
+        "🍽 غذا آماده شد و به مشتری اطلاع داده شد",
+        reply_markup=kb
+    )
+
+    await call.answer("پیام ارسال شد")
+    
+@dp.callback_query_handler(lambda c: c.data.startswith("rate:"))
+async def rate(call: types.CallbackQuery):
+    _, uid, score = call.data.split(":")
+    uid = int(uid)
+    score = int(score)
+
+    if uid not in stats:
+        await call.answer("خطا", show_alert=True)
+        return
+
+    stats[uid]["ratings"].append(score)
+
+    await call.message.edit_text(
+        "❤️ ممنون از امتیاز شما\n"
+        "🌹 منتظر دیدار دوباره‌تان هستیم"
+    )
+
+    await call.answer("ثبت شد")
 
 # ===================== RUN =====================
 if __name__ == "__main__":
