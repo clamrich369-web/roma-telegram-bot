@@ -1,14 +1,47 @@
 from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import *
+import sqlite3
 from datetime import datetime
 
+# ================= CONFIG =================
 TOKEN = "8543932711:AAFBzavfn2MunYAvnCKWiAEisUIyEmT04XQ"
 ADMIN_IDS = [289763127]
 
+CARD_NUMBER = "6219-8618-1166-9158"
+CARD_OWNER = "امین آقازاده"
+INSTAGRAM = "@roma.italianfoods"
+PHONE = "09141604866"
+
+# ================= BOT =================
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
-# ================= DATA =================
+# ================= DATABASE =================
+db = sqlite3.connect("roma.db")
+sql = db.cursor()
+
+sql.execute("""
+CREATE TABLE IF NOT EXISTS users (
+    user_id INTEGER PRIMARY KEY,
+    name TEXT,
+    phone TEXT
+)
+""")
+
+sql.execute("""
+CREATE TABLE IF NOT EXISTS orders (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER,
+    items TEXT,
+    total INTEGER,
+    status TEXT,
+    created_at TEXT
+)
+""")
+
+db.commit()
+
+# ================= MENU =================
 MENU = {
     "آلفردو": 450,
     "آناکاردی": 480,
@@ -22,40 +55,31 @@ MENU = {
     "پیتزا پپرونی": 580
 }
 
-CARD_NUMBER = "6219-8618-1166-9158"
-CARD_OWNER = "امین آقازاده"
-INSTAGRAM = "@roma.italianfoods"
-PHONE = "09141604866"
-
-users = {}
 carts = {}
-orders = {}
 feedback_wait = set()
 
 # ================= START =================
 @dp.message_handler(commands=['start'])
 async def start(message):
     uid = message.from_user.id
-    if uid in users:
+    sql.execute("SELECT * FROM users WHERE user_id=?", (uid,))
+    if sql.fetchone():
         await show_main_menu(message)
     else:
         kb = ReplyKeyboardMarkup(resize_keyboard=True)
         kb.add(KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))
-        await message.answer("🍝 به ROMA خوش آمدید\nلطفاً شماره تلفن خود را ارسال کنید", reply_markup=kb)
+        await message.answer("🍝 به ROMA خوش آمدید\nشماره تلفن خود را ارسال کنید", reply_markup=kb)
 
 # ================= REGISTER =================
-@dp.message_handler(content_types=ContentType.CONTACT)
+@dp.message_handler(content_types=['contact'])
 async def register(message):
     uid = message.from_user.id
-    if uid in users:
-        await message.answer("شما قبلاً ثبت‌نام کرده‌اید")
-        return
-
-    users[uid] = {
-        "name": message.from_user.full_name,
-        "phone": message.contact.phone_number
-    }
-    carts[uid] = {}
+    sql.execute(
+        "INSERT OR IGNORE INTO users VALUES (?,?,?)",
+        (uid, message.from_user.full_name, message.contact.phone_number)
+    )
+    db.commit()
+    carts.setdefault(uid, {})
     await message.answer("✅ ثبت‌نام انجام شد")
     await show_main_menu(message)
 
@@ -72,20 +96,20 @@ async def show_main_menu(message):
 # ================= CONTACT =================
 @dp.message_handler(lambda m: m.text == "📞 تماس با ما")
 async def contact(message):
-    await message.answer(f"📞 تماس: {PHONE}")
+    await message.answer(f"📞 {PHONE}")
 
 @dp.message_handler(lambda m: m.text == "📷 اینستاگرام")
 async def instagram(message):
-    await message.answer(f"📷 اینستاگرام ما:\n{INSTAGRAM}")
+    await message.answer(f"📷 اینستاگرام:\n{INSTAGRAM}")
 
-# ================= MENU =================
+# ================= FOOD MENU =================
 @dp.message_handler(lambda m: m.text == "🍽 منوی غذا")
-async def menu(message):
+async def food_menu(message):
     kb = InlineKeyboardMarkup(row_width=2)
-    for food, price in MENU.items():
-        kb.add(InlineKeyboardButton(f"{food} - {price}", callback_data=f"food:{food}"))
+    for f, p in MENU.items():
+        kb.add(InlineKeyboardButton(f"{f} - {p}", callback_data=f"food:{f}"))
     kb.add(InlineKeyboardButton("🛒 سبد خرید", callback_data="cart"))
-    await message.answer("غذای مورد نظر را انتخاب کنید:", reply_markup=kb)
+    await message.answer("غذا را انتخاب کنید:", reply_markup=kb)
 
 # ================= ADD FOOD =================
 @dp.callback_query_handler(lambda c: c.data.startswith("food:"))
@@ -94,53 +118,45 @@ async def choose_qty(call):
     kb = InlineKeyboardMarkup()
     for i in range(1, 6):
         kb.add(InlineKeyboardButton(str(i), callback_data=f"add:{food}:{i}"))
-    kb.add(InlineKeyboardButton("⬅ بازگشت به منو", callback_data="back_menu"))
-    await call.message.edit_text(f"تعداد {food} را انتخاب کنید:", reply_markup=kb)
+    kb.add(InlineKeyboardButton("⬅ بازگشت", callback_data="back"))
+    await call.message.edit_text(f"تعداد {food}:", reply_markup=kb)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("add:"))
 async def add_cart(call):
     _, food, qty = call.data.split(":")
     uid = call.from_user.id
+    carts.setdefault(uid, {})
     carts[uid][food] = carts[uid].get(food, 0) + int(qty)
+    await call.message.edit_text("✅ اضافه شد")
 
-    kb = InlineKeyboardMarkup()
-    kb.add(
-        InlineKeyboardButton("➕ افزودن غذای دیگر", callback_data="back_menu"),
-        InlineKeyboardButton("🛒 سبد خرید", callback_data="cart")
-    )
-    await call.message.edit_text("✅ به سبد اضافه شد", reply_markup=kb)
-
-@dp.callback_query_handler(lambda c: c.data == "back_menu")
-async def back_menu(call):
-    await menu(call.message)
+@dp.callback_query_handler(lambda c: c.data == "back")
+async def back(call):
+    await food_menu(call.message)
 
 # ================= CART =================
 @dp.callback_query_handler(lambda c: c.data == "cart")
 async def cart(call):
     uid = call.from_user.id
-    if not carts[uid]:
-        await call.message.edit_text("❌ سبد خرید خالی است")
+    if uid not in carts or not carts[uid]:
+        await call.message.edit_text("❌ سبد خالی است")
         return
 
     total = 0
     text = "🛒 سبد خرید\n\n"
     kb = InlineKeyboardMarkup()
 
-    for food, qty in carts[uid].items():
-        price = MENU[food] * qty
+    for f, q in carts[uid].items():
+        price = MENU[f] * q
         total += price
-        text += f"{food} × {qty} = {price}\n"
-        kb.add(InlineKeyboardButton(f"❌ حذف {food}", callback_data=f"del:{food}"))
+        text += f"{f} × {q} = {price}\n"
+        kb.add(InlineKeyboardButton(f"❌ حذف {f}", callback_data=f"del:{f}"))
 
-    text += f"\n💰 جمع کل: {total}"
-    kb.add(
-        InlineKeyboardButton("✅ تایید سفارش", callback_data="confirm"),
-        InlineKeyboardButton("🍽 افزودن غذا", callback_data="back_menu")
-    )
+    text += f"\n💰 جمع: {total}"
+    kb.add(InlineKeyboardButton("✅ ثبت سفارش", callback_data="confirm"))
     await call.message.edit_text(text, reply_markup=kb)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("del:"))
-async def delete_item(call):
+async def delete(call):
     carts[call.from_user.id].pop(call.data.split(":")[1], None)
     await cart(call)
 
@@ -148,54 +164,29 @@ async def delete_item(call):
 @dp.callback_query_handler(lambda c: c.data == "confirm")
 async def confirm(call):
     uid = call.from_user.id
-    total = sum(MENU[f]*q for f,q in carts[uid].items())
-    orders[uid] = {"items": carts[uid], "total": total}
+    items = carts[uid]
+    total = sum(MENU[f]*q for f,q in items.items())
 
-    kb = InlineKeyboardMarkup()
-    kb.add(
-        InlineKeyboardButton("💳 کارت به کارت", callback_data="card"),
-        InlineKeyboardButton("🏠 پرداخت حضوری", callback_data="cash")
+    sql.execute(
+        "INSERT INTO orders (user_id, items, total, status, created_at) VALUES (?,?,?,?,?)",
+        (uid, str(items), total, "pending", datetime.now().strftime("%Y-%m-%d %H:%M"))
     )
-    await call.message.edit_text("روش پرداخت را انتخاب کنید:", reply_markup=kb)
-
-# ================= CASH PAYMENT =================
-@dp.callback_query_handler(lambda c: c.data == "cash")
-async def cash(call):
-    uid = call.from_user.id
-    user = users[uid]
-    order = orders[uid]
-
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("✅ تایید پرداخت حضوری", callback_data=f"cash_ok:{uid}"))
+    db.commit()
 
     for admin in ADMIN_IDS:
         await bot.send_message(
             admin,
-            f"""🏠 پرداخت حضوری
-👤 {user['name']}
-📞 {user['phone']}
-💰 مبلغ: {order['total']}""",
-            reply_markup=kb
+            f"🛒 سفارش جدید\n👤 {uid}\n💰 {total}"
         )
 
-    await call.message.edit_text("✅ سفارش ثبت شد\n⏳ منتظر تایید ادمین")
-
-@dp.callback_query_handler(lambda c: c.data.startswith("cash_ok"))
-async def cash_ok(call):
-    uid = int(call.data.split(":")[1])
-
-    await bot.send_message(uid, "✅ پرداخت حضوری تایید شد\n🍝 غذا تا ۱۵ دقیقه آماده می‌شود")
-
-    kb = InlineKeyboardMarkup()
-    kb.add(InlineKeyboardButton("🍝 غذا آماده شد", callback_data=f"food_ready:{uid}"))
-
-    await call.message.answer("پرداخت حضوری تایید شد", reply_markup=kb)
+    carts.pop(uid, None)
+    await call.message.edit_text("✅ سفارش ثبت شد\n⏳ در حال آماده‌سازی")
 
 # ================= FEEDBACK =================
 @dp.message_handler(lambda m: m.text == "💬 انتقادات و پیشنهادات")
 async def feedback_start(message):
     feedback_wait.add(message.from_user.id)
-    await message.answer("✍️ نظر یا پیشنهاد خود را بنویسید:")
+    await message.answer("✍️ پیام خود را بنویسید")
 
 @dp.message_handler()
 async def feedback_receive(message):
@@ -204,28 +195,24 @@ async def feedback_receive(message):
         return
 
     feedback_wait.remove(uid)
-    user = users[uid]
-
     for admin in ADMIN_IDS:
-        await bot.send_message(
-            admin,
-            f"""💬 نظر جدید
-👤 {user['name']}
-📞 {user['phone']}
-📝 {message.text}"""
-        )
+        await bot.send_message(admin, f"💬 نظر جدید:\n{message.text}")
 
     await message.answer("🙏 ممنون از نظر شما")
 
 # ================= ADMIN REPORT =================
 @dp.message_handler(lambda m: m.text == "📊 گزارش ادمین")
 async def report(message):
+    sql.execute("SELECT COUNT(*) FROM users")
+    users_count = sql.fetchone()[0]
+
+    sql.execute("SELECT COUNT(*) FROM orders")
+    orders_count = sql.fetchone()[0]
+
     await message.answer(
-        f"""📊 گزارش
-👥 کاربران: {len(users)}
-🛒 سفارش‌های فعال: {len(orders)}"""
+        f"📊 گزارش\n👥 کاربران: {users_count}\n🛒 سفارش‌ها: {orders_count}"
     )
 
-executor.start_polling(dp)
+# ================= RUN =================
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
