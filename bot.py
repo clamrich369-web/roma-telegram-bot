@@ -2,7 +2,7 @@ from aiogram import Bot, Dispatcher, executor, types
 from aiogram.types import *
 from datetime import datetime
 
-TOKEN = "YOUR_NEW_TOKEN"
+TOKEN = "8543932711:AAFBzavfn2MunYAvnCKWiAEisUIyEmT04XQ"
 ADMIN_IDS = [289763127]
 
 bot = Bot(token=TOKEN)
