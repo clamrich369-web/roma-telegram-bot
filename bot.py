@@ -138,19 +138,37 @@ async def delete_item(call):
     await cart(call)
 
 # ===================== CONFIRM =====================
-@dp.callback_query_handler(lambda c: c.data == "confirm")
-async def confirm(call):
-    uid = call.from_user.id
-    total = sum(MENU[f] * q for f, q in carts[uid].items())
+@dp.callback_query_handler(text="pay_cash")
+async def pay_cash(callback: types.CallbackQuery):
+    user_id = callback.from_user.id
+    order = user_orders.get(user_id)
 
-    orders[uid] = {"items": carts[uid], "total": total}
+    if not order:
+        await callback.answer("سفارشی پیدا نشد", show_alert=True)
+        return
 
-    kb = InlineKeyboardMarkup()
-    kb.add(
-        InlineKeyboardButton("💳 کارت به کارت", callback_data="card"),
-        InlineKeyboardButton("🏠 پرداخت حضوری", callback_data="cash")
+    await callback.message.answer(
+        "✅ سفارش شما ثبت شد\n"
+        "⏳ پس از آماده شدن غذا اطلاع داده می‌شود"
     )
-    await call.message.edit_text("روش پرداخت را انتخاب کنید:", reply_markup=kb)
+
+    admin_text = (
+        "💵 پرداخت حضوری جدید\n\n"
+        f"👤 نام: {callback.from_user.full_name}\n"
+        f"🆔 آیدی: {user_id}\n\n"
+        f"🍽 سفارش:\n{order}"
+    )
+
+    keyboard = InlineKeyboardMarkup()
+    keyboard.add(
+        InlineKeyboardButton("🍽 غذا آماده است", callback_data=f"food_ready:{user_id}"),
+        InlineKeyboardButton("❌ بستن سفارش", callback_data=f"close_order:{user_id}")
+    )
+
+    for admin in ADMIN_IDS:
+        await bot.send_message(admin, admin_text, reply_markup=keyboard)
+
+    await callback.answer()
 
 # ===================== CARD PAYMENT =====================
 @dp.callback_query_handler(lambda c: c.data == "card")
@@ -273,6 +291,37 @@ async def report(message):
         f"📈 میانگین امتیاز: {avg_rating}\n"
         f"✍️ انتقادات/پیشنهادات: {len(feedbacks)}"
     )
+@dp.callback_query_handler(lambda c: c.data.startswith("food_ready:"))
+async def food_ready(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+
+    user_id = int(callback.data.split(":")[1])
+
+    await bot.send_message(
+        user_id,
+        "🍽 غذای شما آماده است\n"
+        "🙏 منتظر حضور شما هستیم"
+    )
+
+    await callback.answer("پیام ارسال شد")
+@dp.callback_query_handler(lambda c: c.data.startswith("close_order:"))
+async def close_order(callback: types.CallbackQuery):
+    if callback.from_user.id not in ADMIN_IDS:
+        return
+
+    user_id = int(callback.data.split(":")[1])
+
+    user_orders.pop(user_id, None)
+
+    await bot.send_message(
+        user_id,
+        "🙏 از اینکه ما رو انتخاب کردید ممنونیم\n"
+        "🌹 منتظر حضور دوباره شما هستیم"
+    )
+
+    await callback.message.edit_text("✅ سفارش بسته شد")
+    await callback.answer()
 
 # ===================== RUN =====================
 if __name__ == "__main__":
