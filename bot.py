@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime
 
 # ================= CONFIG =================
-TOKEN = "8543932711:AAFBzavfn2MunYAvnCKWiAEisUIyEmT04XQ"
+TOKEN = "YOUR_NEW_TOKEN"
 ADMIN_IDS = [289763127]
 
 CARD_NUMBER = "6219-8618-1166-9158"
@@ -34,14 +34,14 @@ CREATE TABLE IF NOT EXISTS orders (
     user_id INTEGER,
     items TEXT,
     total INTEGER,
+    payment TEXT,
     status TEXT,
     created_at TEXT
 )
 """)
-
 db.commit()
 
-# ================= MENU =================
+# ================= DATA =================
 MENU = {
     "آلفردو": 450,
     "آناکاردی": 480,
@@ -56,19 +56,20 @@ MENU = {
 }
 
 carts = {}
+waiting_receipt = set()
 feedback_wait = set()
 
 # ================= START =================
-@dp.message_handler(commands=['start'])
+@dp.message_handler(commands=["start"])
 async def start(message):
     uid = message.from_user.id
     sql.execute("SELECT * FROM users WHERE user_id=?", (uid,))
     if sql.fetchone():
-        await show_main_menu(message)
+        await show_menu(message)
     else:
         kb = ReplyKeyboardMarkup(resize_keyboard=True)
         kb.add(KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))
-        await message.answer("🍝 به ROMA خوش آمدید\nشماره تلفن خود را ارسال کنید", reply_markup=kb)
+        await message.answer("🍝 به ROMA خوش آمدید\nشماره خود را ارسال کنید", reply_markup=kb)
 
 # ================= REGISTER =================
 @dp.message_handler(content_types=['contact'])
@@ -81,16 +82,16 @@ async def register(message):
     db.commit()
     carts.setdefault(uid, {})
     await message.answer("✅ ثبت‌نام انجام شد")
-    await show_main_menu(message)
+    await show_menu(message)
 
 # ================= MAIN MENU =================
-async def show_main_menu(message):
+async def show_menu(message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("🍽 منوی غذا")
     kb.add("💬 انتقادات و پیشنهادات")
+    kb.add("📞 تماس با ما", "📷 اینستاگرام")
     if message.from_user.id in ADMIN_IDS:
         kb.add("📊 گزارش ادمین")
-    kb.add("📞 تماس با ما", "📷 اینستاگرام")
     await message.answer("انتخاب کنید:", reply_markup=kb)
 
 # ================= CONTACT =================
@@ -100,7 +101,7 @@ async def contact(message):
 
 @dp.message_handler(lambda m: m.text == "📷 اینستاگرام")
 async def instagram(message):
-    await message.answer(f"📷 اینستاگرام:\n{INSTAGRAM}")
+    await message.answer(INSTAGRAM)
 
 # ================= FOOD MENU =================
 @dp.message_handler(lambda m: m.text == "🍽 منوی غذا")
@@ -127,7 +128,7 @@ async def add_cart(call):
     uid = call.from_user.id
     carts.setdefault(uid, {})
     carts[uid][food] = carts[uid].get(food, 0) + int(qty)
-    await call.message.edit_text("✅ اضافه شد")
+    await call.message.edit_text("✅ به سبد اضافه شد")
 
 @dp.callback_query_handler(lambda c: c.data == "back")
 async def back(call):
@@ -137,7 +138,7 @@ async def back(call):
 @dp.callback_query_handler(lambda c: c.data == "cart")
 async def cart(call):
     uid = call.from_user.id
-    if uid not in carts or not carts[uid]:
+    if not carts.get(uid):
         await call.message.edit_text("❌ سبد خالی است")
         return
 
@@ -151,42 +152,105 @@ async def cart(call):
         text += f"{f} × {q} = {price}\n"
         kb.add(InlineKeyboardButton(f"❌ حذف {f}", callback_data=f"del:{f}"))
 
-    text += f"\n💰 جمع: {total}"
-    kb.add(InlineKeyboardButton("✅ ثبت سفارش", callback_data="confirm"))
+    text += f"\n💰 جمع کل: {total}"
+    kb.add(InlineKeyboardButton("✅ تایید سفارش", callback_data="confirm"))
     await call.message.edit_text(text, reply_markup=kb)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("del:"))
-async def delete(call):
+async def delete_item(call):
     carts[call.from_user.id].pop(call.data.split(":")[1], None)
     await cart(call)
 
-# ================= CONFIRM =================
+# ================= PAYMENT =================
 @dp.callback_query_handler(lambda c: c.data == "confirm")
-async def confirm(call):
+async def payment(call):
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("💳 کارت به کارت", callback_data="pay_card"),
+        InlineKeyboardButton("🏠 پرداخت حضوری", callback_data="pay_cash")
+    )
+    await call.message.edit_text("روش پرداخت را انتخاب کنید:", reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data == "pay_card")
+async def pay_card(call):
+    uid = call.from_user.id
+    total = sum(MENU[f]*q for f,q in carts[uid].items())
+
+    waiting_receipt.add(uid)
+
+    await call.message.edit_text(
+        f"💳 کارت به کارت\n\n"
+        f"💰 مبلغ: {total}\n\n"
+        f"🏦 {CARD_NUMBER}\n"
+        f"👤 {CARD_OWNER}\n\n"
+        "📸 لطفاً رسید پرداخت را ارسال کنید"
+    )
+
+@dp.message_handler(content_types=['photo'])
+async def receipt(message):
+    uid = message.from_user.id
+    if uid not in waiting_receipt:
+        return
+
+    waiting_receipt.remove(uid)
+    items = carts[uid]
+    total = sum(MENU[f]*q for f,q in items.items())
+
+    sql.execute(
+        "INSERT INTO orders VALUES (NULL,?,?,?,?,?,?)",
+        (uid, str(items), total, "card", "pending", datetime.now().strftime("%Y-%m-%d %H:%M"))
+    )
+    db.commit()
+
+    for admin in ADMIN_IDS:
+        kb = InlineKeyboardMarkup()
+        kb.add(
+            InlineKeyboardButton("✅ تایید پرداخت", callback_data=f"approve:{uid}"),
+            InlineKeyboardButton("🍝 غذا آماده شد", callback_data=f"ready:{uid}")
+        )
+        await bot.send_photo(admin, message.photo[-1].file_id,
+                             caption=f"💳 رسید پرداخت\n👤 {uid}\n💰 {total}",
+                             reply_markup=kb)
+
+    carts.pop(uid, None)
+    await message.answer("✅ رسید ارسال شد\n⏳ منتظر تایید ادمین")
+
+@dp.callback_query_handler(lambda c: c.data == "pay_cash")
+async def pay_cash(call):
     uid = call.from_user.id
     items = carts[uid]
     total = sum(MENU[f]*q for f,q in items.items())
 
     sql.execute(
-        "INSERT INTO orders (user_id, items, total, status, created_at) VALUES (?,?,?,?,?)",
-        (uid, str(items), total, "pending", datetime.now().strftime("%Y-%m-%d %H:%M"))
+        "INSERT INTO orders VALUES (NULL,?,?,?,?,?,?)",
+        (uid, str(items), total, "cash", "confirmed", datetime.now().strftime("%Y-%m-%d %H:%M"))
     )
     db.commit()
 
     for admin in ADMIN_IDS:
-        await bot.send_message(
-            admin,
-            f"🛒 سفارش جدید\n👤 {uid}\n💰 {total}"
-        )
+        kb = InlineKeyboardMarkup()
+        kb.add(InlineKeyboardButton("🍝 غذا آماده شد", callback_data=f"ready:{uid}"))
+        await bot.send_message(admin, f"🏠 پرداخت حضوری\n👤 {uid}\n💰 {total}", reply_markup=kb)
 
     carts.pop(uid, None)
-    await call.message.edit_text("✅ سفارش ثبت شد\n⏳ در حال آماده‌سازی")
+    await call.message.edit_text("✅ سفارش حضوری ثبت شد")
+
+# ================= ADMIN =================
+@dp.callback_query_handler(lambda c: c.data.startswith("approve"))
+async def approve(call):
+    uid = int(call.data.split(":")[1])
+    await bot.send_message(uid, "✅ پرداخت شما تایید شد")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("ready"))
+async def ready(call):
+    uid = int(call.data.split(":")[1])
+    await bot.send_message(uid, "🍝 غذای شما آماده شد، نوش جان ❤️")
 
 # ================= FEEDBACK =================
 @dp.message_handler(lambda m: m.text == "💬 انتقادات و پیشنهادات")
 async def feedback_start(message):
     feedback_wait.add(message.from_user.id)
-    await message.answer("✍️ پیام خود را بنویسید")
+    await message.answer("✍️ نظر خود را بنویسید")
 
 @dp.message_handler()
 async def feedback_receive(message):
@@ -197,21 +261,16 @@ async def feedback_receive(message):
     feedback_wait.remove(uid)
     for admin in ADMIN_IDS:
         await bot.send_message(admin, f"💬 نظر جدید:\n{message.text}")
+    await message.answer("🙏 ممنون")
 
-    await message.answer("🙏 ممنون از نظر شما")
-
-# ================= ADMIN REPORT =================
+# ================= REPORT =================
 @dp.message_handler(lambda m: m.text == "📊 گزارش ادمین")
 async def report(message):
     sql.execute("SELECT COUNT(*) FROM users")
-    users_count = sql.fetchone()[0]
-
+    u = sql.fetchone()[0]
     sql.execute("SELECT COUNT(*) FROM orders")
-    orders_count = sql.fetchone()[0]
-
-    await message.answer(
-        f"📊 گزارش\n👥 کاربران: {users_count}\n🛒 سفارش‌ها: {orders_count}"
-    )
+    o = sql.fetchone()[0]
+    await message.answer(f"📊 گزارش\n👥 کاربران: {u}\n🛒 سفارش‌ها: {o}")
 
 # ================= RUN =================
 if __name__ == "__main__":
