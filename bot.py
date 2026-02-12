@@ -344,24 +344,89 @@ async def receipt(message):
 
     await message.answer("⏳ فیش شما برای ادمین ارسال شد و در حال بررسی است")
 
-@dp.callback_query_handler(lambda c: c.data.startswith("food_ready:"))
-async def food_ready(call):
-    uid = int(call.data.split(":")[1])
-    await bot.send_message(uid, "🍽 غذای شما آماده است\n🙏 منتظر حضور شما هستیم")
-    await call.answer("ارسال شد")
+@dp.callback_query_handler(lambda c: c.data.startswith("delivered:"))
+async def delivered_order(call: types.CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        await call.answer("دسترسی ندارید", show_alert=True)
+        return
 
-@dp.callback_query_handler(lambda c: c.data.startswith("close_order:"))
-async def close_order(call):
     uid = int(call.data.split(":")[1])
-    orders.pop(uid, None)
-    carts[uid] = {}
+
+    if uid not in orders:
+        await call.answer("سفارش پیدا نشد", show_alert=True)
+        return
+
+    # بروزرسانی آمار
+    stats[uid]["orders"] += 1
+    stats[uid]["total"] += orders[uid]["total"]
+
+    # پیام تشکر + امتیازدهی برای مشتری
+    kb = InlineKeyboardMarkup(row_width=5)
+    for i in range(1, 6):
+        kb.insert(
+            InlineKeyboardButton(f"⭐ {i}", callback_data=f"rate:{uid}:{i}")
+        )
 
     await bot.send_message(
         uid,
-        "🙏 از اینکه ما را انتخاب کردید ممنونیم\n🌹 منتظر حضور دوباره شما هستیم"
+        "🙏 از اینکه ROMA را انتخاب کردید ممنونیم\n"
+        "🌹 خوشحال می‌شویم به ما امتیاز بدهید",
+        reply_markup=kb
     )
-    await call.message.edit_text("✅ سفارش بسته شد")
-    await call.answer()
+
+    # پاکسازی سفارش
+    carts[uid] = {}
+    orders.pop(uid, None)
+
+    await call.message.edit_text("✅ سفارش با موفقیت بسته شد")
+    await call.answer("سفارش بسته شد")
+    
+@dp.callback_query_handler(lambda c: c.data.startswith("rate:"))
+async def rate(call: types.CallbackQuery):
+    _, uid, score = call.data.split(":")
+    uid = int(uid)
+    score = int(score)
+
+    if uid not in stats:
+        await call.answer("خطا", show_alert=True)
+        return
+
+    stats[uid]["ratings"].append(score)
+
+    await call.message.edit_text(
+        "❤️ ممنون از امتیاز شما\n"
+        "🌹 منتظر دیدار دوباره‌تان هستیم"
+    )
+
+    await call.answer("ثبت شد")
+@dp.callback_query_handler(lambda c: c.data.startswith("food_ready:"))
+async def food_ready(call: types.CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+
+    uid = int(call.data.split(":")[1])
+
+    await bot.send_message(
+        uid,
+        "🍝 غذای شما آماده است\n"
+        "🙏 منتظر حضور شما هستیم"
+    )
+
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton(
+            "📦 سفارش تحویل شد",
+            callback_data=f"delivered:{uid}"
+        )
+    )
+
+    await call.message.edit_text(
+        "🍽 غذا آماده شد و به مشتری اطلاع داده شد",
+        reply_markup=kb
+    )
+
+    await call.answer("پیام ارسال شد")
+
 # ================= ADMIN REPORT =================
 @dp.message_handler(lambda m: m.text == "📊 گزارش ادمین")
 async def report(message):
