@@ -262,6 +262,52 @@ async def card(call):
         f"👤 {CARD_OWNER}\n\n"
         f"📸 بعد از پرداخت، فیش را ارسال کنید"
     )
+@dp.callback_query_handler(lambda c: c.data.startswith("pay_ok:"))
+async def pay_ok(call: types.CallbackQuery):
+    uid = int(call.data.split(":")[1])
+
+    if uid not in orders:
+        await call.answer("سفارش پیدا نشد", show_alert=True)
+        return
+
+    orders[uid]["status"] = "paid"
+
+    # پیام به مشتری
+    await bot.send_message(
+        uid,
+        "✅ پرداخت شما تایید شد\n🍝 غذا تا ۱۵ دقیقه دیگر آماده می‌شود"
+    )
+
+    # دکمه ادامه برای ادمین
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("🍝 غذا آماده است", callback_data=f"food_ready:{uid}")
+    )
+
+    await call.message.edit_caption(
+        call.message.caption + "\n\n✅ پرداخت تایید شد",
+        reply_markup=kb
+    )
+
+    await call.answer("پرداخت تایید شد ✅")
+    
+@dp.callback_query_handler(lambda c: c.data.startswith("pay_no:"))
+async def pay_no(call: types.CallbackQuery):
+    uid = int(call.data.split(":")[1])
+
+    if uid in orders:
+        orders.pop(uid)
+
+    await bot.send_message(
+        uid,
+        "❌ پرداخت شما تایید نشد\nدر صورت نیاز دوباره سفارش ثبت کنید"
+    )
+
+    await call.message.edit_caption(
+        call.message.caption + "\n\n❌ پرداخت رد شد"
+    )
+
+    await call.answer("پرداخت رد شد ❌")
 
 # ===================== ADMIN ACTIONS =====================
 @dp.message_handler(content_types=ContentType.PHOTO)
