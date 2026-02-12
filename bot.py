@@ -8,6 +8,7 @@ ADMIN_IDS = [289763127]
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
+
 # ===================== DATA =====================
 MENU = {
     "آلفردو": 450,
@@ -83,6 +84,51 @@ async def instagram(message):
         "@roma.italianfoods\n"
         "https://instagram.com/roma.italianfoods"
     )
+    
+# ===================== FEEDBACK START =====================
+@dp.message_handler(lambda m: m.text == "✍️ انتقاد و پیشنهاد")
+async def feedback_start(message):
+    await message.answer(
+        "✍️ انتقاد یا پیشنهاد خود را بنویسید:\n"
+        "پیام شما مستقیماً برای مدیریت ارسال می‌شود."
+    )
+    
+# ===================== FEEDBACK RECEIVE =====================
+@dp.message_handler(
+    lambda m: m.text
+    and m.text not in [
+        "🍽 منوی غذا",
+        "📊 گزارش ادمین",
+        "📞 تماس با ما",
+        "📷 اینستاگرام",
+        "✍️ انتقاد و پیشنهاد"
+    ]
+)
+async def feedback_receive(message):
+    uid = message.from_user.id
+
+    if uid not in users:
+        return
+
+    feedback = {
+        "name": users[uid]["name"],
+        "phone": users[uid]["phone"],
+        "text": message.text
+    }
+
+    feedbacks.append(feedback)
+
+    # ارسال برای ادمین
+    for admin in ADMIN_IDS:
+        await bot.send_message(
+            admin,
+            f"✍️ انتقاد / پیشنهاد جدید\n\n"
+            f"👤 نام: {feedback['name']}\n"
+            f"📞 تلفن: {feedback['phone']}\n"
+            f"📝 متن:\n{feedback['text']}"
+        )
+
+    await message.answer("🙏 ممنون از نظر شما")
 
 # ===================== FOOD MENU =====================
 @dp.message_handler(lambda m: m.text == "🍽 منوی غذا")
@@ -222,6 +268,14 @@ async def close_order(call):
     )
     await call.message.edit_text("✅ سفارش بسته شد")
     await call.answer()
+# ================= ADMIN REPORT =================
+@dp.message_handler(lambda m: m.text == "📊 گزارش ادمین")
+async def report(message):
+    await message.answer(
+        f"""📊 گزارش
+👥 کاربران: {len(users)}
+🛒 سفارش‌های فعال: {len(orders)}"""
+    )
 
 # ===================== RUN =====================
 if __name__ == "__main__":
