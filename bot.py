@@ -4,7 +4,7 @@ import sqlite3
 from datetime import datetime
 
 # ================= CONFIG =================
-TOKEN = "YOUR_NEW_TOKEN"
+TOKEN = "8543932711:AAFBzavfn2MunYAvnCKWiAEisUIyEmT04XQ"
 ADMIN_IDS = [289763127]
 
 CARD_NUMBER = "6219-8618-1166-9158"
