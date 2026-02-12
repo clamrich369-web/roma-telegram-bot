@@ -264,32 +264,38 @@ async def card(call):
     )
 @dp.callback_query_handler(lambda c: c.data.startswith("pay_ok:"))
 async def pay_ok(call: types.CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+
     uid = int(call.data.split(":")[1])
 
     if uid not in orders:
         await call.answer("سفارش پیدا نشد", show_alert=True)
         return
 
-    orders[uid]["status"] = "paid"
-
     # پیام به مشتری
     await bot.send_message(
         uid,
-        "✅ پرداخت شما تایید شد\n🍝 غذا تا ۱۵ دقیقه دیگر آماده می‌شود"
+        "✅ پرداخت شما با موفقیت تایید شد\n"
+        "🍝 غذا تا ۱۵ دقیقه دیگر آماده می‌شود"
     )
 
-    # دکمه ادامه برای ادمین
+    # دکمه ادامه فلو برای ادمین
     kb = InlineKeyboardMarkup()
     kb.add(
-        InlineKeyboardButton("🍝 غذا آماده است", callback_data=f"food_ready:{uid}")
+        InlineKeyboardButton(
+            "🍽 غذا آماده شد",
+            callback_data=f"food_ready:{uid}"
+        )
     )
 
-    await call.message.edit_caption(
-        call.message.caption + "\n\n✅ پرداخت تایید شد",
+    await call.message.answer(
+        "💳 پرداخت کارت‌به‌کارت تایید شد\n"
+        "برای ادامه روی دکمه زیر بزنید 👇",
         reply_markup=kb
     )
 
-    await call.answer("پرداخت تایید شد ✅")
+    await call.answer("پرداخت تایید شد")
     
 @dp.callback_query_handler(lambda c: c.data.startswith("pay_no:"))
 async def pay_no(call: types.CallbackQuery):
