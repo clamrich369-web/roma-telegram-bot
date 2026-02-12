@@ -245,11 +245,59 @@ async def pay_cash(call):
 # ===================== CARD =====================
 @dp.callback_query_handler(lambda c: c.data == "card")
 async def card(call):
+    uid = call.from_user.id
+
+    total = sum(MENU[f] * q for f, q in carts[uid].items())
+
+    orders[uid] = {
+        "items": carts[uid],
+        "total": total,
+        "payment": "card",
+        "status": "waiting_admin"
+    }
+
     await call.message.edit_text(
-        f"💳 کارت به کارت\n\n{CARD_NUMBER}\n👤 {CARD_OWNER}\n\nفیش پرداخت را ارسال کنید"
+        f"💳 کارت به کارت\n\n"
+        f"{CARD_NUMBER}\n"
+        f"👤 {CARD_OWNER}\n\n"
+        f"📸 بعد از پرداخت، فیش را ارسال کنید"
     )
 
 # ===================== ADMIN ACTIONS =====================
+@dp.message_handler(content_types=ContentType.PHOTO)
+async def receipt(message):
+    uid = message.from_user.id
+
+    if uid not in orders:
+        await message.answer("❌ سفارشی برای بررسی پیدا نشد")
+        return
+
+    order = orders[uid]
+    user = users[uid]
+
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("✅ تایید پرداخت", callback_data=f"pay_ok:{uid}"),
+        InlineKeyboardButton("❌ رد پرداخت", callback_data=f"pay_no:{uid}")
+    )
+
+    for admin in ADMIN_IDS:
+        await bot.send_photo(
+            admin,
+            message.photo[-1].file_id,
+            caption=(
+                "🧾 فیش پرداخت کارت به کارت\n\n"
+                f"👤 نام: {user['name']}\n"
+                f"📞 تلفن: {user['phone']}\n"
+                f"💰 مبلغ: {order['total']} تومان\n\n"
+                f"📦 سفارش:\n" +
+                "\n".join([f"{f} × {q}" for f, q in order["items"].items()])
+            ),
+            reply_markup=kb
+        )
+
+    await message.answer("⏳ فیش شما برای ادمین ارسال شد و در حال بررسی است")
+
 @dp.callback_query_handler(lambda c: c.data.startswith("food_ready:"))
 async def food_ready(call):
     uid = int(call.data.split(":")[1])
