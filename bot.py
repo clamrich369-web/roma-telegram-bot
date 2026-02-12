@@ -303,7 +303,6 @@ async def food_ready(callback: types.CallbackQuery):
         "🍽 غذای شما آماده است\n"
         "🙏 منتظر حضور شما هستیم"
     )
-
     await callback.answer("پیام ارسال شد")
 @dp.callback_query_handler(lambda c: c.data.startswith("close_order:"))
 async def close_order(callback: types.CallbackQuery):
@@ -319,10 +318,9 @@ async def close_order(callback: types.CallbackQuery):
         "🙏 از اینکه ما رو انتخاب کردید ممنونیم\n"
         "🌹 منتظر حضور دوباره شما هستیم"
     )
-
     await callback.message.edit_text("✅ سفارش بسته شد")
     await callback.answer()
-
+    
 # ===================== RUN =====================
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
