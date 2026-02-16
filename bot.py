@@ -428,7 +428,7 @@ async def delivered_order(call: types.CallbackQuery):
             InlineKeyboardButton(f"⭐ {i}", callback_data=f"rate:{uid}:{i}")
         )
         
-        @dp.callback_query_handler(lambda c: c.data.startswith("delivered_to_courier_"))
+@dp.callback_query_handler(lambda c: c.data.startswith("delivered_to_courier_"))
 async def delivered_to_courier(call: CallbackQuery):
     order_id = call.data.split("_")[3]
     user_id = get_order_user(order_id)
