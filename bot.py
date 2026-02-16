@@ -9,7 +9,7 @@ import os
 
 logging.basicConfig(level=logging.INFO)
 
-TOKEN = "8543932711:AAFBzavfn2MunYAvnCKWiAEisUIyEmT04XQ"
+TOKEN = "PUT_YOUR_TOKEN"
 ADMIN_IDS = [289763127]
 
 bot = Bot(token=TOKEN)
@@ -81,7 +81,7 @@ class PaymentState(StatesGroup):
     waiting_for_receipt = State()
 
 class OrderState(StatesGroup):
-    waiting_for_quantity = State()  # برای انتخاب تعداد غذا
+    waiting_for_quantity = State()
 
 # ===================== START =====================
 @dp.message_handler(commands=["start"])
@@ -207,24 +207,21 @@ async def food_menu(message: types.Message):
     
     await message.answer(text, reply_markup=kb)
 
-# ===================== SELECT FOOD (CHOOSE QUANTITY FIRST) =====================
+# ===================== SELECT FOOD =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("select_food:"))
 async def select_food(call: CallbackQuery, state: FSMContext):
     food = call.data.split(":")[1]
     
-    # ذخیره موقت غذایی که انتخاب شده
     await state.update_data(selected_food=food)
     await OrderState.waiting_for_quantity.set()
     
     kb = InlineKeyboardMarkup(row_width=3)
     
-    # دکمه‌های انتخاب تعداد
     buttons = []
     for i in range(1, 6):
         buttons.append(InlineKeyboardButton(str(i), callback_data=f"qty:{i}"))
     kb.add(*buttons)
     
-    # دکمه‌های کمکی
     kb.add(
         InlineKeyboardButton("🔙 بازگشت به منو", callback_data="back_to_menu")
     )
@@ -236,7 +233,7 @@ async def select_food(call: CallbackQuery, state: FSMContext):
         reply_markup=kb
     )
 
-# ===================== ADD TO CART WITH SELECTED QUANTITY =====================
+# ===================== ADD TO CART =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("qty:"), state=OrderState.waiting_for_quantity)
 async def add_to_cart_with_qty(call: CallbackQuery, state: FSMContext):
     qty = int(call.data.split(":")[1])
@@ -249,7 +246,6 @@ async def add_to_cart_with_qty(call: CallbackQuery, state: FSMContext):
         await state.finish()
         return
     
-    # اضافه کردن به سبد خرید
     if uid not in carts:
         carts[uid] = {}
     
@@ -260,7 +256,6 @@ async def add_to_cart_with_qty(call: CallbackQuery, state: FSMContext):
     save_carts()
     await state.finish()
     
-    # محاسبه مجموع
     total_items = sum(carts[uid].values())
     total_price = sum(MENU[f] * q for f, q in carts[uid].items())
     
@@ -518,7 +513,7 @@ async def pay_cash(call: CallbackQuery):
         reply_markup=kb
     )
     
-    # پاک کردن سبد خرید بعد از ثبت سفارش
+    # پاک کردن سبد خرید
     carts[uid] = {}
     save_carts()
 
@@ -657,7 +652,6 @@ async def approve_order(call: CallbackQuery):
         orders[uid]["status"] = "approved"
         save_orders()
         
-        # ارسال پیام به کاربر
         await bot.send_message(
             uid,
             "✅ سفارش شما تأیید شد!\n\n"
@@ -665,19 +659,77 @@ async def approve_order(call: CallbackQuery):
             "⏳ لطفاً منتظر بمانید"
         )
     
-    # اضافه کردن دکمه اتمام سفارش برای ادمین
-    kb = InlineKeyboardMarkup(row_width=2)
-    kb.add(
-        InlineKeyboardButton("✅ غذا آماده شد", callback_data=f"ready:{uid}"),
-        InlineKeyboardButton("🏁 اتمام سفارش", callback_data=f"complete_order:{uid}")
-    )
-    
+    # حذف دکمه‌ها و نمایش پیام تأیید
     await call.message.edit_text(
-        call.message.text + "\n\n✅ سفارش تأیید شد",
-        reply_markup=kb
+        call.message.text + "\n\n✅ سفارش تأیید شد"
     )
     await call.answer("✅ سفارش تأیید شد")
 
+@dp.callback_query_handler(lambda c: c.data.startswith("reject_order:"))
+async def reject_order(call: CallbackQuery):
+    uid = int(call.data.split(":")[1])
+    
+    if uid in orders:
+        orders[uid]["status"] = "rejected"
+        save_orders()
+    
+    await bot.send_message(
+        uid,
+        "❌ متأسفانه سفارش شما رد شد!\n"
+        "لطفاً با پشتیبانی تماس بگیرید: 09141604866"
+    )
+    
+    # حذف دکمه‌ها و نمایش پیام رد
+    await call.message.edit_text(
+        call.message.text + "\n\n❌ سفارش رد شد"
+    )
+    await call.answer("❌ سفارش رد شد")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("approve_payment:"))
+async def approve_payment(call: CallbackQuery):
+    uid = int(call.data.split(":")[1])
+    
+    if uid in orders:
+        orders[uid]["status"] = "paid"
+        save_orders()
+        
+        await bot.send_message(
+            uid,
+            "✅ پرداخت شما تأیید شد!\n\n"
+            "🍝 سفارش شما در حال آماده‌سازی است\n"
+            "⏳ لطفاً منتظر بمانید"
+        )
+    
+    # حذف دکمه‌ها و نمایش پیام تأیید
+    await call.message.edit_caption(
+        call.message.caption + "\n\n✅ پرداخت تأیید شد"
+    )
+    await call.answer("✅ پرداخت تأیید شد")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("reject_payment:"))
+async def reject_payment(call: CallbackQuery):
+    uid = int(call.data.split(":")[1])
+    
+    if uid in orders:
+        orders[uid]["status"] = "payment_rejected"
+        save_orders()
+    
+    await bot.send_message(
+        uid,
+        "❌ پرداخت شما رد شد!\n\n"
+        "💳 لطفاً مجدداً تلاش کنید:\n"
+        f"{CARD_NUMBER}\n"
+        f"{CARD_OWNER}\n\n"
+        "یا با پشتیبانی تماس بگیرید: 09141604866"
+    )
+    
+    # حذف دکمه‌ها و نمایش پیام رد
+    await call.message.edit_caption(
+        call.message.caption + "\n\n❌ پرداخت رد شد"
+    )
+    await call.answer("❌ پرداخت رد شد")
+
+# ===================== ORDER READY =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("ready:"))
 async def order_ready(call: CallbackQuery):
     uid = int(call.data.split(":")[1])
@@ -702,7 +754,7 @@ async def order_ready(call: CallbackQuery):
     )
     await call.answer("✅ اطلاع‌رسانی شد")
 
-# ===================== COMPLETE ORDER (برای ادمین) =====================
+# ===================== COMPLETE ORDER =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("complete_order:"))
 async def complete_order(call: CallbackQuery):
     uid = int(call.data.split(":")[1])
@@ -711,10 +763,6 @@ async def complete_order(call: CallbackQuery):
         orders[uid]["status"] = "delivered"
         save_orders()
         
-        # پاک کردن سفارش از لیست سفارشات فعال (اختیاری)
-        # می‌توانیم سفارش را نگه داریم برای تاریخچه، ولی وضعیت را delivered می‌گذاریم
-        
-        # اطمینان از خالی بودن سبد خرید کاربر برای سفارش بعدی
         if uid in carts:
             carts[uid] = {}
             save_carts()
@@ -726,84 +774,11 @@ async def complete_order(call: CallbackQuery):
             "🌟 منتظر حضور دوباره شما هستیم"
         )
     
+    # حذف دکمه و نمایش پیام اتمام
     await call.message.edit_text(
         call.message.text + "\n\n🏁 سفارش به پایان رسید"
     )
     await call.answer("✅ سفارش کامل شد")
-
-@dp.callback_query_handler(lambda c: c.data.startswith("reject_order:"))
-async def reject_order(call: CallbackQuery):
-    uid = int(call.data.split(":")[1])
-    
-    if uid in orders:
-        orders[uid]["status"] = "rejected"
-        save_orders()
-    
-    await bot.send_message(
-        uid,
-        "❌ متأسفانه سفارش شما رد شد!\n"
-        "لطفاً با پشتیبانی تماس بگیرید: 09141604866"
-    )
-    
-    await call.message.edit_text(
-        call.message.text + "\n\n❌ سفارش رد شد"
-    )
-    await call.answer("❌ سفارش رد شد")
-
-@dp.callback_query_handler(lambda c: c.data.startswith("approve_payment:"))
-async def approve_payment(call: CallbackQuery):
-    uid = int(call.data.split(":")[1])
-    
-    if uid in orders:
-        orders[uid]["status"] = "paid"
-        save_orders()
-        
-        # اضافه کردن دکمه‌های بعدی برای ادمین
-        kb = InlineKeyboardMarkup(row_width=2)
-        kb.add(
-            InlineKeyboardButton("✅ غذا آماده شد", callback_data=f"ready:{uid}"),
-            InlineKeyboardButton("🏁 اتمام سفارش", callback_data=f"complete_order:{uid}")
-        )
-        
-        await bot.send_message(
-            uid,
-            "✅ پرداخت شما تأیید شد!\n\n"
-            "🍝 سفارش شما در حال آماده‌سازی است\n"
-            "⏳ لطفاً منتظر بمانید"
-        )
-        
-        await call.message.edit_caption(
-            call.message.caption + "\n\n✅ پرداخت تأیید شد",
-            reply_markup=kb
-        )
-    else:
-        await call.message.edit_caption(
-            call.message.caption + "\n\n✅ پرداخت تأیید شد"
-        )
-    
-    await call.answer("✅ پرداخت تأیید شد")
-
-@dp.callback_query_handler(lambda c: c.data.startswith("reject_payment:"))
-async def reject_payment(call: CallbackQuery):
-    uid = int(call.data.split(":")[1])
-    
-    if uid in orders:
-        orders[uid]["status"] = "payment_rejected"
-        save_orders()
-    
-    await bot.send_message(
-        uid,
-        "❌ پرداخت شما رد شد!\n\n"
-        "💳 لطفاً مجدداً تلاش کنید:\n"
-        f"{CARD_NUMBER}\n"
-        f"{CARD_OWNER}\n\n"
-        "یا با پشتیبانی تماس بگیرید: 09141604866"
-    )
-    
-    await call.message.edit_caption(
-        call.message.caption + "\n\n❌ پرداخت رد شد"
-    )
-    await call.answer("❌ پرداخت رد شد")
 
 # ===================== HELPERS =====================
 @dp.message_handler(commands=["help"])
