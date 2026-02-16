@@ -25,29 +25,23 @@ ORDERS_FILE = "orders.json"
 def load_data():
     global users, carts, orders
     
-    # بارگذاری کاربران
     if os.path.exists(USERS_FILE):
         with open(USERS_FILE, 'r', encoding='utf-8') as f:
             users = json.load(f)
-            # تبدیل کلیدها به اینتجر
             users = {int(k): v for k, v in users.items()}
     else:
         users = {}
     
-    # بارگذاری سبد خرید
     if os.path.exists(CARTS_FILE):
         with open(CARTS_FILE, 'r', encoding='utf-8') as f:
             carts = json.load(f)
-            # تبدیل کلیدها به اینتجر
             carts = {int(k): v for k, v in carts.items()}
     else:
         carts = {}
     
-    # بارگذاری سفارشات
     if os.path.exists(ORDERS_FILE):
         with open(ORDERS_FILE, 'r', encoding='utf-8') as f:
             orders = json.load(f)
-            # تبدیل کلیدها به اینتجر
             orders = {int(k): v for k, v in orders.items()}
     else:
         orders = {}
@@ -64,7 +58,6 @@ def save_orders():
     with open(ORDERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(orders, f, ensure_ascii=False, indent=2)
 
-# بارگذاری اطلاعات هنگام شروع
 load_data()
 
 # ===================== DATA =====================
@@ -84,14 +77,15 @@ CARD_OWNER = "امین آقازاده"
 class RegisterState(StatesGroup):
     waiting_for_contact = State()
 
+class PaymentState(StatesGroup):
+    waiting_for_receipt = State()  # منتظر ماندن برای دریافت فیش
+
 # ===================== START =====================
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     uid = message.from_user.id
     
-    # بررسی وجود کاربر در فایل
     if str(uid) in users or uid in users:
-        # اطمینان از وجود سبد خرید
         if uid not in carts:
             carts[uid] = {}
             save_carts()
@@ -121,7 +115,6 @@ async def register(message: types.Message, state: FSMContext):
     }
     carts[uid] = {}
     
-    # ذخیره در فایل
     save_users()
     save_carts()
     
@@ -153,12 +146,10 @@ async def insta(message: types.Message):
 async def food_menu(message: types.Message):
     uid = message.from_user.id
     
-    # بررسی ثبت‌نام کاربر
     if str(uid) not in users and uid not in users:
         await start(message)
         return
     
-    # اطمینان از وجود سبد خرید
     if uid not in carts:
         carts[uid] = {}
         save_carts()
@@ -173,7 +164,6 @@ async def food_menu(message: types.Message):
         button_text = f"➕ {food} - {price} تومان"
         kb.add(InlineKeyboardButton(button_text, callback_data=f"add_to_cart:{food}"))
     
-    # دکمه مشاهده سبد خرید
     if carts[uid]:
         total_items = sum(carts[uid].values())
         total_price = sum(MENU[f] * q for f, q in carts[uid].items())
@@ -189,7 +179,6 @@ async def direct_add_to_cart(call: CallbackQuery):
     food = call.data.split(":")[1]
     uid = call.from_user.id
     
-    # اضافه کردن مستقیم به سبد خرید
     if uid not in carts:
         carts[uid] = {}
     
@@ -197,14 +186,11 @@ async def direct_add_to_cart(call: CallbackQuery):
         carts[uid][food] = 0
     carts[uid][food] += 1
     
-    # ذخیره سبد خرید
     save_carts()
     
-    # محاسبه تعداد کل آیتم‌ها و قیمت کل
     total_items = sum(carts[uid].values())
     total_price = sum(MENU[f] * q for f, q in carts[uid].items())
     
-    # ایجاد کیبورد برای ادامه خرید
     kb = InlineKeyboardMarkup(row_width=2)
     kb.add(
         InlineKeyboardButton("➕ ادامه خرید", callback_data="back_to_menu"),
@@ -234,7 +220,6 @@ async def change_quantity(call: CallbackQuery):
     
     kb = InlineKeyboardMarkup(row_width=3)
     
-    # دکمه‌های انتخاب تعداد
     buttons = []
     for i in range(1, 6):
         if i == current_qty:
@@ -243,7 +228,6 @@ async def change_quantity(call: CallbackQuery):
             buttons.append(InlineKeyboardButton(str(i), callback_data=f"set_qty:{food}:{i}"))
     kb.add(*buttons)
     
-    # دکمه‌های کمکی
     kb.add(
         InlineKeyboardButton("➖ کاهش", callback_data=f"decrease_qty:{food}"),
         InlineKeyboardButton("➕ افزایش", callback_data=f"increase_qty:{food}"),
@@ -272,7 +256,6 @@ async def set_quantity(call: CallbackQuery):
     carts[uid][food] = int(qty)
     save_carts()
     
-    # نمایش سبد خرید به‌روز شده
     await show_cart(call)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("increase_qty:"))
@@ -286,7 +269,6 @@ async def increase_quantity(call: CallbackQuery):
     carts[uid][food] = carts[uid].get(food, 1) + 1
     save_carts()
     
-    # نمایش دوباره صفحه تغییر تعداد
     await change_quantity(call)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("decrease_qty:"))
@@ -302,13 +284,11 @@ async def decrease_quantity(call: CallbackQuery):
         save_carts()
         await change_quantity(call)
     else:
-        # اگر تعداد به 1 برسد و کاربر کاهش دهد، آیتم حذف می‌شود
         await delete_item(call)
 
 # ===================== BACK TO MENU =====================
 @dp.callback_query_handler(lambda c: c.data == "back_to_menu")
 async def back_to_menu(call: CallbackQuery):
-    # اینجا باید یک پیام جدید ارسال کنیم، چون در کالبک نمی‌توانیم از message_handler استفاده کنیم
     uid = call.from_user.id
     
     text = "🍽 منوی غذا:\n\n"
@@ -321,7 +301,6 @@ async def back_to_menu(call: CallbackQuery):
         button_text = f"➕ {food} - {price} تومان"
         kb.add(InlineKeyboardButton(button_text, callback_data=f"add_to_cart:{food}"))
     
-    # دکمه مشاهده سبد خرید
     if uid in carts and carts[uid]:
         total_items = sum(carts[uid].values())
         total_price = sum(MENU[f] * q for f, q in carts[uid].items())
@@ -403,6 +382,7 @@ async def confirm(call: CallbackQuery):
         "items": carts[uid].copy(),
         "total": total,
         "method": None,
+        "status": "pending",  # وضعیت سفارش: pending, paid, preparing, ready, delivered
         "date": str(call.message.date)
     }
     save_orders()
@@ -425,20 +405,31 @@ async def confirm(call: CallbackQuery):
 @dp.callback_query_handler(lambda c: c.data == "pay_cash")
 async def pay_cash(call: CallbackQuery):
     uid = call.from_user.id
+    
+    if uid not in orders:
+        await call.message.edit_text("❌ سفارشی یافت نشد!")
+        return
+    
     orders[uid]["method"] = "cash"
+    orders[uid]["status"] = "waiting_for_approval"
     save_orders()
     
     items_text = "\n".join([f"• {k} × {v}" for k, v in carts[uid].items()])
     
+    # ارسال به ادمین
     for admin in ADMIN_IDS:
-        kb = InlineKeyboardMarkup()
-        kb.add(InlineKeyboardButton("✅ غذا آماده شد", callback_data=f"ready:{uid}"))
+        kb = InlineKeyboardMarkup(row_width=2)
+        kb.add(
+            InlineKeyboardButton("✅ تأیید سفارش", callback_data=f"approve_order:{uid}"),
+            InlineKeyboardButton("❌ رد سفارش", callback_data=f"reject_order:{uid}")
+        )
         
         await bot.send_message(
             admin,
             f"💰 سفارش جدید - پرداخت حضوری\n\n"
             f"👤 نام: {users[uid]['name']}\n"
-            f"📞 شماره: {users[uid]['phone']}\n\n"
+            f"📞 شماره: {users[uid]['phone']}\n"
+            f"🆔 آیدی: {uid}\n\n"
             f"📝 سفارش:\n{items_text}\n\n"
             f"💰 مبلغ: {orders[uid]['total']} تومان",
             reply_markup=kb
@@ -449,16 +440,303 @@ async def pay_cash(call: CallbackQuery):
     
     await call.message.edit_text(
         "✅ سفارش شما با موفقیت ثبت شد!\n\n"
-        "⏳ منتظر تأیید رستوران باشید\n"
-        "🍝 غذای شما در حال آماده‌سازی است",
+        "⏳ در انتظار تأیید رستوران\n"
+        "🍝 پس از تأیید، غذای شما آماده خواهد شد",
         reply_markup=kb
     )
     
-    # پاک کردن سبد خرید بعد از ثبت سفارش
+    # پاک کردن سبد خرید
     carts[uid] = {}
     save_carts()
 
-# بقیه کدهای پرداخت و ادمین به همین شکل ادامه پیدا می‌کند...
+@dp.callback_query_handler(lambda c: c.data == "pay_card")
+async def pay_card(call: CallbackQuery, state: FSMContext):
+    uid = call.from_user.id
+    
+    if uid not in orders:
+        await call.message.edit_text("❌ سفارشی یافت نشد!")
+        return
+    
+    orders[uid]["method"] = "card"
+    orders[uid]["status"] = "waiting_for_payment"
+    save_orders()
+    
+    # تنظیم حالت برای دریافت فیش
+    await state.set_state(PaymentState.waiting_for_receipt)
+    # ذخیره موقت اینکه این کاربر برای کدام سفارش فیش می‌فرستد
+    await state.update_data(order_uid=uid)
+    
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("❌ انصراف", callback_data="cancel_payment"))
+    
+    await call.message.edit_text(
+        f"💳 پرداخت کارت به کارت\n\n"
+        f"🏦 اطلاعات کارت:\n"
+        f"💳 شماره کارت: {CARD_NUMBER}\n"
+        f"👤 به نام: {CARD_OWNER}\n\n"
+        f"💰 مبلغ قابل پرداخت: {orders[uid]['total']} تومان\n\n"
+        f"📸 لطفاً پس از واریز، تصویر فیش پرداخت را ارسال کنید.\n"
+        f"⚠️ حتماً رسید پرداخت را به وضوح ارسال نمایید.",
+        reply_markup=kb
+    )
+
+@dp.callback_query_handler(lambda c: c.data == "pay_delivery")
+async def pay_delivery(call: CallbackQuery, state: FSMContext):
+    uid = call.from_user.id
+    
+    if uid not in orders:
+        await call.message.edit_text("❌ سفارشی یافت نشد!")
+        return
+    
+    orders[uid]["method"] = "delivery"
+    orders[uid]["status"] = "waiting_for_payment"
+    save_orders()
+    
+    # تنظیم حالت برای دریافت فیش
+    await state.set_state(PaymentState.waiting_for_receipt)
+    await state.update_data(order_uid=uid)
+    
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("❌ انصراف", callback_data="cancel_payment"))
+    
+    await call.message.edit_text(
+        f"🚚 ارسال با پیک\n\n"
+        f"برای ارسال سفارش با پیک:\n\n"
+        f"1️⃣ مبلغ {orders[uid]['total']} تومان را به کارت زیر واریز کنید:\n"
+        f"💳 {CARD_NUMBER}\n"
+        f"👤 {CARD_OWNER}\n\n"
+        f"2️⃣ تصویر فیش پرداخت را ارسال کنید\n"
+        f"3️⃣ آدرس دقیق خود را وارد کنید\n\n"
+        f"📸 لطفاً پس از واریز، تصویر فیش را ارسال کنید:",
+        reply_markup=kb
+    )
+
+@dp.callback_query_handler(lambda c: c.data == "cancel_payment", state=PaymentState.waiting_for_receipt)
+async def cancel_payment(call: CallbackQuery, state: FSMContext):
+    await state.finish()
+    await call.message.edit_text(
+        "❌ پرداخت لغو شد.\n"
+        "می‌توانید از منوی اصلی دوباره اقدام کنید."
+    )
+
+# ===================== RECEIVE RECEIPT =====================
+@dp.message_handler(content_types=ContentType.PHOTO, state=PaymentState.waiting_for_receipt)
+async def receive_receipt(message: types.Message, state: FSMContext):
+    data = await state.get_data()
+    uid = message.from_user.id
+    order_uid = data.get('order_uid')
+    
+    if not order_uid or order_uid != uid:
+        await message.answer("❌ خطا در شناسایی سفارش!")
+        await state.finish()
+        return
+    
+    if uid not in orders:
+        await message.answer("❌ سفارشی یافت نشد!")
+        await state.finish()
+        return
+    
+    orders[uid]["status"] = "payment_received"
+    save_orders()
+    
+    items_text = "\n".join([f"• {k} × {v}" for k, v in orders[uid]['items'].items()])
+    
+    # ارسال فیش به ادمین
+    for admin in ADMIN_IDS:
+        kb = InlineKeyboardMarkup(row_width=2)
+        kb.add(
+            InlineKeyboardButton("✅ تأیید پرداخت", callback_data=f"approve_payment:{uid}"),
+            InlineKeyboardButton("❌ رد پرداخت", callback_data=f"reject_payment:{uid}")
+        )
+        
+        caption = (
+            f"🧾 فیش پرداخت جدید\n\n"
+            f"👤 نام: {users[uid]['name']}\n"
+            f"📞 شماره: {users[uid]['phone']}\n"
+            f"🆔 آیدی: {uid}\n"
+            f"💰 مبلغ: {orders[uid]['total']} تومان\n"
+            f"💳 روش: {orders[uid]['method']}\n\n"
+            f"📝 سفارش:\n{items_text}"
+        )
+        
+        await bot.send_photo(
+            admin,
+            message.photo[-1].file_id,
+            caption=caption,
+            reply_markup=kb
+        )
+    
+    await state.finish()
+    
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("🏠 بازگشت به منو", callback_data="back_to_menu"))
+    
+    await message.answer(
+        "✅ فیش پرداخت با موفقیت ارسال شد!\n\n"
+        "⏳ در انتظار تأیید ادمین\n"
+        "📍 پس از تأیید، سفارش شما آماده خواهد شد",
+        reply_markup=kb
+    )
+
+# ===================== RECEIVE ADDRESS FOR DELIVERY =====================
+@dp.message_handler(lambda m: m.text, state=PaymentState.waiting_for_receipt)
+async def receive_address(message: types.Message, state: FSMContext):
+    # اگر کاربر متن ارسال کرد (مثلاً آدرس) ولی هنوز فیش رو نفرستاده
+    await message.answer(
+        "❌ لطفاً ابتدا تصویر فیش پرداخت را ارسال کنید.\n"
+        "اگر می‌خواهید انصراف دهید، دکمه زیر را بزنید:",
+        reply_markup=InlineKeyboardMarkup().add(
+            InlineKeyboardButton("❌ انصراف", callback_data="cancel_payment")
+        )
+    )
+
+# ===================== ADMIN APPROVALS =====================
+@dp.callback_query_handler(lambda c: c.data.startswith("approve_order:"))
+async def approve_order(call: CallbackQuery):
+    uid = int(call.data.split(":")[1])
+    
+    if uid in orders:
+        orders[uid]["status"] = "approved"
+        save_orders()
+    
+    await bot.send_message(
+        uid,
+        "✅ سفارش شما تأیید شد!\n\n"
+        "🍝 در حال آماده‌سازی غذا\n"
+        "⏳ لطفاً منتظر بمانید"
+    )
+    
+    await call.message.edit_text(
+        call.message.text + "\n\n✅ سفارش تأیید شد"
+    )
+    await call.answer("✅ سفارش تأیید شد")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("reject_order:"))
+async def reject_order(call: CallbackQuery):
+    uid = int(call.data.split(":")[1])
+    
+    if uid in orders:
+        orders[uid]["status"] = "rejected"
+        save_orders()
+    
+    await bot.send_message(
+        uid,
+        "❌ متأسفانه سفارش شما رد شد!\n"
+        "لطفاً با پشتیبانی تماس بگیرید: 09141604866"
+    )
+    
+    await call.message.edit_text(
+        call.message.text + "\n\n❌ سفارش رد شد"
+    )
+    await call.answer("❌ سفارش رد شد")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("approve_payment:"))
+async def approve_payment(call: CallbackQuery):
+    uid = int(call.data.split(":")[1])
+    
+    if uid in orders:
+        orders[uid]["status"] = "paid"
+        save_orders()
+    
+    await bot.send_message(
+        uid,
+        "✅ پرداخت شما تأیید شد!\n\n"
+        "🍝 سفارش شما در حال آماده‌سازی است\n"
+        "⏳ لطفاً منتظر بمانید"
+    )
+    
+    await call.message.edit_caption(
+        call.message.caption + "\n\n✅ پرداخت تأیید شد"
+    )
+    await call.answer("✅ پرداخت تأیید شد")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("reject_payment:"))
+async def reject_payment(call: CallbackQuery):
+    uid = int(call.data.split(":")[1])
+    
+    if uid in orders:
+        orders[uid]["status"] = "payment_rejected"
+        save_orders()
+    
+    await bot.send_message(
+        uid,
+        "❌ پرداخت شما رد شد!\n\n"
+        "💳 لطفاً مجدداً تلاش کنید:\n"
+        f"{CARD_NUMBER}\n"
+        f"{CARD_OWNER}\n\n"
+        "یا با پشتیبانی تماس بگیرید: 09141604866"
+    )
+    
+    await call.message.edit_caption(
+        call.message.caption + "\n\n❌ پرداخت رد شد"
+    )
+    await call.answer("❌ پرداخت رد شد")
+
+@dp.callback_query_handler(lambda c: c.data.startswith("ready:"))
+async def order_ready(call: CallbackQuery):
+    uid = int(call.data.split(":")[1])
+    
+    if uid in orders:
+        orders[uid]["status"] = "ready"
+        save_orders()
+    
+    await bot.send_message(
+        uid,
+        "✅ سفارش شما آماده است!\n\n"
+        "🍝 می‌توانید برای تحویل سفارش خود مراجعه کنید"
+    )
+    
+    await call.answer("✅ اطلاع‌رسانی شد")
+
+# ===================== HELPERS =====================
+@dp.message_handler(commands=["help"])
+async def help_command(message: types.Message):
+    await message.answer(
+        "🤖 راهنمای ربات:\n\n"
+        "• /start - شروع مجدد\n"
+        "• منوی غذا - مشاهده منو و سفارش\n"
+        "• تماس با ما - اطلاعات تماس\n"
+        "• اینستاگرام - صفحه اینستاگرام\n\n"
+        "برای هر سوال با پشتیبانی تماس بگیرید: 09141604866"
+    )
+
+@dp.message_handler(commands=["status"])
+async def order_status(message: types.Message):
+    uid = message.from_user.id
+    
+    if uid in orders:
+        status_text = {
+            "pending": "⏳ در انتظار انتخاب روش پرداخت",
+            "waiting_for_payment": "💰 در انتظار پرداخت",
+            "payment_received": "📸 فیش ارسال شده - در انتظار تأیید",
+            "paid": "✅ پرداخت تأیید شده",
+            "approved": "✅ سفارش تأیید شده",
+            "preparing": "🍝 در حال آماده‌سازی",
+            "ready": "✅ آماده تحویل",
+            "delivered": "🚚 تحویل داده شد",
+            "rejected": "❌ رد شده",
+            "payment_rejected": "❌ پرداخت رد شد"
+        }
+        
+        status = orders[uid].get("status", "pending")
+        text = status_text.get(status, "وضعیت نامشخص")
+        
+        await message.answer(f"📊 وضعیت سفارش شما: {text}")
+    else:
+        await message.answer("❌ شما سفارش فعالی ندارید")
+
+# ===================== FALLBACK =====================
+@dp.message_handler()
+async def fallback(message: types.Message):
+    uid = message.from_user.id
+    
+    if str(uid) not in users and uid not in users:
+        await start(message)
+    else:
+        await message.answer(
+            "❌ دستور نامعتبر!\n"
+            "لطفاً از دکمه‌های زیر استفاده کنید"
+        )
 
 # ===================== RUN =====================
 if __name__ == "__main__":
