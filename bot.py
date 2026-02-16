@@ -8,17 +8,12 @@ ADMIN_IDS = [289763127]
 bot = Bot(token=TOKEN)
 dp = Dispatcher(bot)
 
+# ===================== DATA =====================
 MENU = {
     "آلفردو": 450,
-    "آناکاردی": 480,
-    "پینو": 480,
-    "بولونز": 450,
-    "ماتریچیانا": 520,
-    "گامبرتی (میگو)": 550,
-    "لازانیا": 580,
-    "پیتزا استیک گوشت": 720,
     "پیتزا مرغ": 580,
     "پیتزا پپرونی": 580,
+    "لازانیا": 580,
     "نوشابه": 50
 }
 
@@ -30,14 +25,14 @@ carts = {}
 orders = {}
 stats = {}
 
-# ================= START =================
+# ===================== START =====================
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
-    kb.add(KeyboardButton("📱 ارسال شماره تلفن", request_contact=True))
-    await message.answer("🍝 به ROMA خوش آمدید\nشماره تلفن خود را ارسال کنید", reply_markup=kb)
+    kb.add(KeyboardButton("📱 ارسال شماره", request_contact=True))
+    await message.answer("🍝 به ROMA خوش آمدید\nشماره تلفن را ارسال کنید", reply_markup=kb)
 
-# ================= REGISTER =================
+# ===================== REGISTER =====================
 @dp.message_handler(content_types=ContentType.CONTACT)
 async def register(message: types.Message):
     uid = message.from_user.id
@@ -46,61 +41,61 @@ async def register(message: types.Message):
         "phone": message.contact.phone_number
     }
     carts[uid] = {}
-    stats[uid] = {"orders": 0, "total": 0, "ratings": []}
+    stats[uid] = {"orders": 0, "total": 0}
     await show_main_menu(message)
 
-# ================= MAIN MENU =================
+# ===================== MAIN MENU =====================
 async def show_main_menu(message):
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("🍽 منوی غذا", "✍️ انتقاد و پیشنهاد")
     kb.add("📞 تماس با ما", "📷 اینستاگرام")
-    if message.from_user.id in ADMIN_IDS:
-        kb.add("📊 گزارش ادمین")
     await message.answer("انتخاب کنید:", reply_markup=kb)
 
-# ================= MENU =================
+# ===================== CONTACT =====================
+@dp.message_handler(lambda m: m.text == "📞 تماس با ما")
+async def contact_us(message):
+    await message.answer("📞 09141604866")
+
+@dp.message_handler(lambda m: m.text == "📷 اینستاگرام")
+async def instagram(message):
+    await message.answer("https://instagram.com/roma.italianfoods")
+
+# ===================== FOOD MENU =====================
 @dp.message_handler(lambda m: m.text == "🍽 منوی غذا")
-async def show_menu(message):
+async def food_menu(message):
     kb = InlineKeyboardMarkup(row_width=2)
     for food, price in MENU.items():
-        kb.add(InlineKeyboardButton(f"{food} - {price}", callback_data=f"food:{food}"))
+        kb.add(InlineKeyboardButton(f"{food} - {price}", callback_data=f"add:{food}"))
     kb.add(InlineKeyboardButton("🛒 سبد خرید", callback_data="cart"))
-    await message.answer("غذای مورد نظر را انتخاب کنید:", reply_markup=kb)
-
-@dp.callback_query_handler(lambda c: c.data.startswith("food:"))
-async def choose_qty(call: CallbackQuery):
-    food = call.data.split(":")[1]
-    kb = InlineKeyboardMarkup()
-    for i in range(1, 6):
-        kb.add(InlineKeyboardButton(str(i), callback_data=f"add:{food}:{i}"))
-    await call.message.edit_text("تعداد را انتخاب کنید:", reply_markup=kb)
+    await message.answer("منو:", reply_markup=kb)
 
 @dp.callback_query_handler(lambda c: c.data.startswith("add:"))
-async def add_cart(call: CallbackQuery):
-    _, food, qty = call.data.split(":")
+async def add_to_cart(call: CallbackQuery):
+    food = call.data.split(":")[1]
     uid = call.from_user.id
-    carts[uid][food] = carts[uid].get(food, 0) + int(qty)
-    await call.message.edit_text("✅ به سبد خرید اضافه شد")
+    carts[uid][food] = carts[uid].get(food, 0) + 1
+    await call.answer("به سبد اضافه شد")
 
-# ================= CART =================
+# ===================== CART =====================
 @dp.callback_query_handler(lambda c: c.data == "cart")
-async def cart(call: CallbackQuery):
+async def show_cart(call: CallbackQuery):
     uid = call.from_user.id
     if not carts[uid]:
-        await call.message.edit_text("❌ سبد خرید خالی است")
+        await call.message.edit_text("سبد خالی است")
         return
 
     total = 0
     text = "🛒 سبد خرید\n\n"
-    for f, q in carts[uid].items():
-        total += MENU[f] * q
-        text += f"{f} × {q}\n"
+    for food, qty in carts[uid].items():
+        price = MENU[food] * qty
+        total += price
+        text += f"{food} × {qty} = {price}\n"
 
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("✅ تایید سفارش", callback_data="confirm"))
-    await call.message.edit_text(text + f"\n💰 {total}", reply_markup=kb)
+    await call.message.edit_text(text + f"\n💰 جمع: {total}", reply_markup=kb)
 
-# ================= CONFIRM =================
+# ===================== CONFIRM =====================
 @dp.callback_query_handler(lambda c: c.data == "confirm")
 async def confirm(call: CallbackQuery):
     uid = call.from_user.id
@@ -113,39 +108,47 @@ async def confirm(call: CallbackQuery):
         InlineKeyboardButton("💳 کارت به کارت", callback_data="pay_card"),
         InlineKeyboardButton("🚚 ارسال به پیک", callback_data="pay_delivery")
     )
-
     await call.message.edit_text("روش پرداخت را انتخاب کنید:", reply_markup=kb)
 
-# ================= PAY CASH =================
+# ===================== CASH =====================
 @dp.callback_query_handler(lambda c: c.data == "pay_cash")
 async def pay_cash(call: CallbackQuery):
     uid = call.from_user.id
+    order = orders[uid]
+    text = "\n".join([f"{k} × {v}" for k, v in order["items"].items()])
+
     for admin in ADMIN_IDS:
-        await bot.send_message(admin, f"💵 پرداخت حضوری\n👤 {users[uid]['name']}")
+        kb = InlineKeyboardMarkup()
+        kb.add(
+            InlineKeyboardButton("🍽 غذا آماده شد", callback_data=f"ready:{uid}")
+        )
+        await bot.send_message(
+            admin,
+            f"💵 پرداخت حضوری\n👤 {users[uid]['name']}\n{text}",
+            reply_markup=kb
+        )
+
     await call.message.edit_text("✅ سفارش ثبت شد")
 
-# ================= PAY CARD / DELIVERY =================
-@dp.callback_query_handler(lambda c: c.data in ["pay_card", "pay_delivery"])
+# ===================== CARD =====================
+@dp.callback_query_handler(lambda c: c.data == "pay_card")
 async def pay_card(call: CallbackQuery):
-    uid = call.from_user.id
     await call.message.edit_text(
-        f"💳 کارت به کارت\n{CARD_NUMBER}\n{CARD_OWNER}\n📸 فیش را ارسال کنید"
+        f"💳 کارت به کارت\n{CARD_NUMBER}\n{CARD_OWNER}\n\n📸 فیش را ارسال کنید"
     )
 
-# ================= RECEIPT =================
 @dp.message_handler(content_types=ContentType.PHOTO)
 async def receive_receipt(message: types.Message):
     uid = message.from_user.id
     if uid not in orders:
         return
 
-    kb = InlineKeyboardMarkup()
-    kb.add(
-        InlineKeyboardButton("✅ تایید", callback_data=f"approve:{uid}"),
-        InlineKeyboardButton("❌ رد", callback_data=f"reject:{uid}")
-    )
-
     for admin in ADMIN_IDS:
+        kb = InlineKeyboardMarkup()
+        kb.add(
+            InlineKeyboardButton("✅ تایید", callback_data=f"approve:{uid}"),
+            InlineKeyboardButton("❌ رد", callback_data=f"reject:{uid}")
+        )
         await bot.send_photo(
             admin,
             message.photo[-1].file_id,
@@ -155,7 +158,6 @@ async def receive_receipt(message: types.Message):
 
     await message.answer("⏳ فیش ارسال شد")
 
-# ================= APPROVE / REJECT =================
 @dp.callback_query_handler(lambda c: c.data.startswith("approve:"))
 async def approve(call: CallbackQuery):
     uid = int(call.data.split(":")[1])
@@ -166,6 +168,19 @@ async def reject(call: CallbackQuery):
     uid = int(call.data.split(":")[1])
     await bot.send_message(uid, "❌ پرداخت رد شد")
 
-# ================= RUN =================
+# ===================== COURIER =====================
+@dp.callback_query_handler(lambda c: c.data == "pay_delivery")
+async def courier(call: CallbackQuery):
+    await call.message.edit_text("🚚 بعد از پرداخت فیش ارسال کنید")
+
+# ===================== READY =====================
+@dp.callback_query_handler(lambda c: c.data.startswith("ready:"))
+async def ready(call: CallbackQuery):
+    uid = int(call.data.split(":")[1])
+    await bot.send_message(uid, "🍝 غذای شما آماده است")
+    carts[uid] = {}
+    orders.pop(uid, None)
+
+# ===================== RUN =====================
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
