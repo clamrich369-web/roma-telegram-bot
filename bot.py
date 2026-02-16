@@ -6,11 +6,13 @@ from aiogram.contrib.fsm_storage.memory import MemoryStorage
 import logging
 import json
 import os
+from datetime import datetime, timedelta
+import jdatetime  # برای تاریخ شمسی
 
 logging.basicConfig(level=logging.INFO)
 
 TOKEN = "8543932711:AAFBzavfn2MunYAvnCKWiAEisUIyEmT04XQ"
-ADMIN_IDS = [289763127]
+ADMIN_IDS = [289763127]  # آیدی ادمین‌ها
 
 bot = Bot(token=TOKEN)
 storage = MemoryStorage()
@@ -20,11 +22,44 @@ dp = Dispatcher(bot, storage=storage)
 USERS_FILE = "users.json"
 CARTS_FILE = "carts.json"
 ORDERS_FILE = "orders.json"
+MENU_FILE = "menu.json"
+SETTINGS_FILE = "settings.json"
 
 # ===================== LOAD/SAVE FUNCTIONS =====================
 def load_data():
-    global users, carts, orders
+    global users, carts, orders, MENU, settings
     
+    # بارگذاری منو
+    if os.path.exists(MENU_FILE):
+        with open(MENU_FILE, 'r', encoding='utf-8') as f:
+            MENU = json.load(f)
+    else:
+        MENU = {
+            "آلفردو": 450,
+            "بولونز": 450,
+            "پیتزا مرغ": 580,
+            "پیتزا پپرونی": 580,
+            "لازانیا": 580,
+            "نوشابه": 50
+        }
+        save_menu()
+    
+    # بارگذاری تنظیمات
+    if os.path.exists(SETTINGS_FILE):
+        with open(SETTINGS_FILE, 'r', encoding='utf-8') as f:
+            settings = json.load(f)
+    else:
+        settings = {
+            "card_number": "6219-8618-1166-9158",
+            "card_owner": "امین آقازاده",
+            "phone": "09141604866",
+            "address": "تهران، ...",
+            "working_hours": "12 ظهر تا 12 شب",
+            "instagram": "@roma.italianfoods"
+        }
+        save_settings()
+    
+    # بارگذاری کاربران
     if os.path.exists(USERS_FILE):
         with open(USERS_FILE, 'r', encoding='utf-8') as f:
             users = json.load(f)
@@ -32,6 +67,7 @@ def load_data():
     else:
         users = {}
     
+    # بارگذاری سبد خرید
     if os.path.exists(CARTS_FILE):
         with open(CARTS_FILE, 'r', encoding='utf-8') as f:
             carts = json.load(f)
@@ -39,6 +75,7 @@ def load_data():
     else:
         carts = {}
     
+    # بارگذاری سفارشات
     if os.path.exists(ORDERS_FILE):
         with open(ORDERS_FILE, 'r', encoding='utf-8') as f:
             orders = json.load(f)
@@ -58,20 +95,19 @@ def save_orders():
     with open(ORDERS_FILE, 'w', encoding='utf-8') as f:
         json.dump(orders, f, ensure_ascii=False, indent=2)
 
+def save_menu():
+    with open(MENU_FILE, 'w', encoding='utf-8') as f:
+        json.dump(MENU, f, ensure_ascii=False, indent=2)
+
+def save_settings():
+    with open(SETTINGS_FILE, 'w', encoding='utf-8') as f:
+        json.dump(settings, f, ensure_ascii=False, indent=2)
+
 load_data()
 
-# ===================== DATA =====================
-MENU = {
-    "آلفردو": 450,
-    "بولونز": 450,
-    "پیتزا مرغ": 580,
-    "پیتزا پپرونی": 580,
-    "لازانیا": 580,
-    "نوشابه": 50
-}
-
-CARD_NUMBER = "6219-8618-1166-9158"
-CARD_OWNER = "امین آقازاده"
+# ===================== CONSTANTS =====================
+CARD_NUMBER = settings["card_number"]
+CARD_OWNER = settings["card_owner"]
 
 # ===================== STATES =====================
 class RegisterState(StatesGroup):
@@ -83,11 +119,39 @@ class PaymentState(StatesGroup):
 class OrderState(StatesGroup):
     waiting_for_quantity = State()
 
+# ===================== ADMIN STATES =====================
+class AdminState(StatesGroup):
+    # منو
+    waiting_for_food_name = State()
+    waiting_for_food_price = State()
+    waiting_for_edit_food = State()
+    waiting_for_edit_price = State()
+    waiting_for_delete_food = State()
+    
+    # تنظیمات
+    waiting_for_card_number = State()
+    waiting_for_card_owner = State()
+    waiting_for_phone = State()
+    waiting_for_address = State()
+    waiting_for_working_hours = State()
+    waiting_for_instagram = State()
+    
+    # گزارشات
+    waiting_for_report_date = State()
+
 # ===================== START =====================
 @dp.message_handler(commands=["start"])
 async def start(message: types.Message):
     uid = message.from_user.id
     
+    # اگر ادمین است
+    if uid in ADMIN_IDS:
+        kb = ReplyKeyboardMarkup(resize_keyboard=True)
+        kb.add("👤 پنل مدیریت", "🍽 منوی غذا", "📊 وضعیت سفارش")
+        await message.answer("👋 خوش آمدید مدیر!", reply_markup=kb)
+        return
+    
+    # اگر کاربر عادی است
     if str(uid) in users or uid in users:
         if uid not in carts:
             carts[uid] = {}
@@ -111,10 +175,18 @@ async def start(message: types.Message):
 @dp.message_handler(content_types=ContentType.CONTACT, state=RegisterState.waiting_for_contact)
 async def register(message: types.Message, state: FSMContext):
     uid = message.from_user.id
+    
+    # اگر ادمین است نیازی به ثبت‌نام ندارد
+    if uid in ADMIN_IDS:
+        await state.finish()
+        return
+    
     users[uid] = {
         "name": message.from_user.full_name,
         "phone": message.contact.phone_number,
-        "register_date": str(message.date)
+        "register_date": str(datetime.now()),
+        "total_orders": 0,
+        "total_spent": 0
     }
     carts[uid] = {}
     
@@ -131,17 +203,16 @@ async def register(message: types.Message, state: FSMContext):
 @dp.message_handler(lambda m: m.text == "📞 تماس با ما")
 async def contact(message: types.Message):
     await message.answer(
-        "📞 09141604866\n"
-        "📍 آدرس: تهران، ...\n"
-        "⏰ ساعت کاری: 12 ظهر تا 12 شب"
+        f"📞 {settings['phone']}\n"
+        f"📍 آدرس: {settings['address']}\n"
+        f"⏰ ساعت کاری: {settings['working_hours']}"
     )
 
 @dp.message_handler(lambda m: m.text == "📷 اینستاگرام")
 async def insta(message: types.Message):
     await message.answer(
-        "📷 اینستاگرام ما:\n"
-        "@roma.italianfoods\n"
-        "🌐 https://instagram.com/roma.italianfoods"
+        f"📷 اینستاگرام ما:\n"
+        f"{settings['instagram']}"
     )
 
 @dp.message_handler(lambda m: m.text == "📊 وضعیت سفارش")
@@ -157,7 +228,7 @@ async def check_order_status(message: types.Message):
             "approved": "✅ سفارش تأیید شده",
             "preparing": "🍝 در حال آماده‌سازی",
             "ready": "✅ آماده تحویل",
-            "delivered": "✅ تحویل داده شد - پایان سفارش",
+            "delivered": "✅ تحویل داده شد",
             "rejected": "❌ رد شده",
             "payment_rejected": "❌ پرداخت رد شد"
         }
@@ -167,19 +238,593 @@ async def check_order_status(message: types.Message):
         
         order_items = "\n".join([f"• {k} × {v}" for k, v in orders[uid]['items'].items()])
         
+        # تاریخ شمسی
+        order_date = datetime.fromisoformat(orders[uid]['date'])
+        persian_date = jdatetime.datetime.fromgregorian(datetime=order_date).strftime("%Y/%m/%d - %H:%M")
+        
         await message.answer(
-            f"📊 وضعیت سفارش شما: {text}\n\n"
+            f"📊 وضعیت سفارش شما: {text}\n"
+            f"📅 تاریخ: {persian_date}\n\n"
             f"📝 سفارش:\n{order_items}\n"
             f"💰 مبلغ: {orders[uid]['total']} تومان"
         )
     else:
         await message.answer("❌ شما سفارش فعالی ندارید")
 
+# ===================== ADMIN PANEL =====================
+@dp.message_handler(lambda m: m.text == "👤 پنل مدیریت")
+async def admin_panel(message: types.Message):
+    uid = message.from_user.id
+    
+    if uid not in ADMIN_IDS:
+        await message.answer("❌ شما دسترسی به این بخش ندارید!")
+        return
+    
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("📋 مدیریت منو", callback_data="admin_menu"),
+        InlineKeyboardButton("💰 مدیریت سفارشات", callback_data="admin_orders"),
+        InlineKeyboardButton("📊 گزارش فروش", callback_data="admin_reports"),
+        InlineKeyboardButton("👥 آمار کاربران", callback_data="admin_users"),
+        InlineKeyboardButton("⚙️ تنظیمات", callback_data="admin_settings"),
+        InlineKeyboardButton("📝 سفارشات در انتظار", callback_data="admin_pending")
+    )
+    
+    await message.answer("🔰 پنل مدیریت", reply_markup=kb)
+
+# ===================== ADMIN MENU MANAGEMENT =====================
+@dp.callback_query_handler(lambda c: c.data == "admin_menu")
+async def admin_menu(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        await call.answer("❌ دسترسی غیرمجاز")
+        return
+    
+    text = "📋 مدیریت منو\n\n"
+    text += "🍽 منوی فعلی:\n"
+    for food, price in MENU.items():
+        text += f"• {food}: {price} تومان\n"
+    
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("➕ اضافه کردن غذا", callback_data="admin_add_food"),
+        InlineKeyboardButton("✏️ ویرایش قیمت", callback_data="admin_edit_price"),
+        InlineKeyboardButton("❌ حذف غذا", callback_data="admin_delete_food"),
+        InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_admin")
+    )
+    
+    await call.message.edit_text(text, reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data == "admin_add_food")
+async def admin_add_food(call: CallbackQuery, state: FSMContext):
+    await call.message.edit_text("🍽 نام غذای جدید را وارد کنید:")
+    await AdminState.waiting_for_food_name.set()
+
+@dp.message_handler(state=AdminState.waiting_for_food_name)
+async def admin_get_food_name(message: types.Message, state: FSMContext):
+    food_name = message.text.strip()
+    await state.update_data(food_name=food_name)
+    await message.answer(f"💰 قیمت {food_name} را وارد کنید (تومان):")
+    await AdminState.waiting_for_food_price.set()
+
+@dp.message_handler(state=AdminState.waiting_for_food_price)
+async def admin_get_food_price(message: types.Message, state: FSMContext):
+    try:
+        price = int(message.text.strip())
+        data = await state.get_data()
+        food_name = data['food_name']
+        
+        MENU[food_name] = price
+        save_menu()
+        
+        await state.finish()
+        await message.answer(f"✅ غذای {food_name} با قیمت {price} تومان اضافه شد!")
+        
+        # برگشت به منوی مدیریت
+        await admin_panel(message)
+    except ValueError:
+        await message.answer("❌ لطفاً یک عدد معتبر وارد کنید:")
+
+@dp.callback_query_handler(lambda c: c.data == "admin_edit_price")
+async def admin_edit_price(call: CallbackQuery, state: FSMContext):
+    text = "✏️ ویرایش قیمت\n\n"
+    text += "غذاهای موجود:\n"
+    for i, (food, price) in enumerate(MENU.items(), 1):
+        text += f"{i}. {food}: {price} تومان\n"
+    
+    kb = InlineKeyboardMarkup(row_width=1)
+    for food in MENU.keys():
+        kb.add(InlineKeyboardButton(food, callback_data=f"edit_food:{food}"))
+    kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="admin_menu"))
+    
+    await call.message.edit_text(text + "\n\nغذا را انتخاب کنید:", reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data.startswith("edit_food:"))
+async def admin_select_food_to_edit(call: CallbackQuery, state: FSMContext):
+    food = call.data.split(":")[1]
+    await state.update_data(edit_food=food)
+    await call.message.edit_text(f"💰 قیمت جدید برای {food} را وارد کنید (قیمت فعلی: {MENU[food]} تومان):")
+    await AdminState.waiting_for_edit_price.set()
+
+@dp.message_handler(state=AdminState.waiting_for_edit_price)
+async def admin_update_price(message: types.Message, state: FSMContext):
+    try:
+        price = int(message.text.strip())
+        data = await state.get_data()
+        food = data['edit_food']
+        
+        old_price = MENU[food]
+        MENU[food] = price
+        save_menu()
+        
+        await state.finish()
+        await message.answer(f"✅ قیمت {food} از {old_price} به {price} تومان تغییر یافت!")
+        await admin_panel(message)
+    except ValueError:
+        await message.answer("❌ لطفاً یک عدد معتبر وارد کنید:")
+
+@dp.callback_query_handler(lambda c: c.data == "admin_delete_food")
+async def admin_delete_food(call: CallbackQuery, state: FSMContext):
+    text = "❌ حذف غذا\n\n"
+    text += "غذاهای موجود:\n"
+    
+    kb = InlineKeyboardMarkup(row_width=1)
+    for food in MENU.keys():
+        kb.add(InlineKeyboardButton(food, callback_data=f"delete_food:{food}"))
+    kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="admin_menu"))
+    
+    await call.message.edit_text(text + "\n\nغذا را برای حذف انتخاب کنید:", reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data.startswith("delete_food:"))
+async def admin_confirm_delete(call: CallbackQuery):
+    food = call.data.split(":")[1]
+    
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("✅ بله، حذف شود", callback_data=f"confirm_delete:{food}"),
+        InlineKeyboardButton("❌ خیر، انصراف", callback_data="admin_menu")
+    )
+    
+    await call.message.edit_text(f"⚠️ آیا از حذف {food} مطمئن هستید؟", reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data.startswith("confirm_delete:"))
+async def admin_do_delete(call: CallbackQuery):
+    food = call.data.split(":")[1]
+    
+    if food in MENU:
+        del MENU[food]
+        save_menu()
+        await call.message.edit_text(f"✅ غذای {food} با موفقیت حذف شد!")
+    
+    await admin_panel(call.message)
+
+# ===================== ADMIN ORDERS MANAGEMENT =====================
+@dp.callback_query_handler(lambda c: c.data == "admin_orders")
+async def admin_orders(call: CallbackQuery):
+    text = "💰 مدیریت سفارشات\n\n"
+    
+    # سفارشات فعال
+    active_orders = {uid: order for uid, order in orders.items() if order.get('status') not in ['delivered', 'rejected']}
+    
+    if not active_orders:
+        text += "📭 سفارش فعالی وجود ندارد."
+        kb = InlineKeyboardMarkup()
+        kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_admin"))
+        await call.message.edit_text(text, reply_markup=kb)
+        return
+    
+    kb = InlineKeyboardMarkup(row_width=1)
+    for uid, order in active_orders.items():
+        status_emoji = {
+            "pending": "⏳",
+            "waiting_for_payment": "💰",
+            "payment_received": "📸",
+            "paid": "✅",
+            "approved": "✅",
+            "preparing": "🍝",
+            "ready": "✅"
+        }.get(order['status'], "📦")
+        
+        button_text = f"{status_emoji} سفارش {users[uid]['name']} - {order['total']} تومان"
+        kb.add(InlineKeyboardButton(button_text, callback_data=f"view_order:{uid}"))
+    
+    kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_admin"))
+    
+    await call.message.edit_text(text, reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data.startswith("view_order:"))
+async def admin_view_order(call: CallbackQuery):
+    uid = int(call.data.split(":")[1])
+    
+    if uid not in orders:
+        await call.message.edit_text("❌ سفارش یافت نشد!")
+        return
+    
+    order = orders[uid]
+    user = users[uid]
+    
+    status_text = {
+        "pending": "⏳ در انتظار پرداخت",
+        "waiting_for_payment": "💰 در انتظار پرداخت",
+        "payment_received": "📸 فیش ارسال شده",
+        "paid": "✅ پرداخت شده",
+        "approved": "✅ تأیید شده",
+        "preparing": "🍝 در حال آماده‌سازی",
+        "ready": "✅ آماده تحویل",
+        "delivered": "✅ تحویل شده",
+        "rejected": "❌ رد شده",
+        "payment_rejected": "❌ پرداخت رد شد"
+    }
+    
+    items_text = "\n".join([f"• {k} × {v}" for k, v in order['items'].items()])
+    
+    text = (
+        f"📦 سفارش {user['name']}\n\n"
+        f"👤 نام: {user['name']}\n"
+        f"📞 شماره: {user['phone']}\n"
+        f"🆔 آیدی: {uid}\n"
+        f"💰 مبلغ: {order['total']} تومان\n"
+        f"💳 روش: {order['method']}\n"
+        f"📊 وضعیت: {status_text.get(order['status'], 'نامشخص')}\n\n"
+        f"📝 آیتم‌ها:\n{items_text}"
+    )
+    
+    kb = InlineKeyboardMarkup(row_width=2)
+    
+    # دکمه‌های بر اساس وضعیت
+    if order['status'] == 'waiting_for_approval' or order['status'] == 'payment_received':
+        kb.add(
+            InlineKeyboardButton("✅ تأیید", callback_data=f"approve_order:{uid}"),
+            InlineKeyboardButton("❌ رد", callback_data=f"reject_order:{uid}")
+        )
+    elif order['status'] == 'approved' or order['status'] == 'paid':
+        kb.add(
+            InlineKeyboardButton("✅ غذا آماده شد", callback_data=f"ready:{uid}"),
+            InlineKeyboardButton("🏁 اتمام سفارش", callback_data=f"complete_order:{uid}")
+        )
+    elif order['status'] == 'ready':
+        kb.add(InlineKeyboardButton("🏁 اتمام سفارش", callback_data=f"complete_order:{uid}"))
+    
+    kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="admin_orders"))
+    
+    await call.message.edit_text(text, reply_markup=kb)
+
+# ===================== ADMIN REPORTS =====================
+@dp.callback_query_handler(lambda c: c.data == "admin_reports")
+async def admin_reports(call: CallbackQuery):
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("📊 گزارش روزانه", callback_data="report_daily"),
+        InlineKeyboardButton("📈 گزارش هفتگی", callback_data="report_weekly"),
+        InlineKeyboardButton("📅 گزارش ماهانه", callback_data="report_monthly"),
+        InlineKeyboardButton("💰 گزارش فروش کل", callback_data="report_total"),
+        InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_admin")
+    )
+    
+    await call.message.edit_text("📊 گزارشات فروش", reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data == "report_daily")
+async def report_daily(call: CallbackQuery):
+    today = datetime.now().date()
+    tomorrow = today + timedelta(days=1)
+    
+    # فیلتر سفارشات امروز
+    daily_orders = []
+    total_sales = 0
+    
+    for uid, order in orders.items():
+        if 'date' in order:
+            order_date = datetime.fromisoformat(order['date']).date()
+            if order_date == today and order.get('status') in ['delivered', 'paid', 'ready']:
+                daily_orders.append(order)
+                total_sales += order['total']
+    
+    persian_date = jdatetime.datetime.fromgregorian(datetime=today).strftime("%Y/%m/%d")
+    
+    text = (
+        f"📊 گزارش فروش روزانه\n"
+        f"📅 تاریخ: {persian_date}\n\n"
+        f"💰 مجموع فروش: {total_sales} تومان\n"
+        f"📦 تعداد سفارشات: {len(daily_orders)}\n\n"
+    )
+    
+    if daily_orders:
+        text += "📝 لیست سفارشات:\n"
+        for i, order in enumerate(daily_orders, 1):
+            text += f"{i}. {order['total']} تومان - {order.get('method', 'نامشخص')}\n"
+    
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="admin_reports"))
+    
+    await call.message.edit_text(text, reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data == "report_weekly")
+async def report_weekly(call: CallbackQuery):
+    today = datetime.now().date()
+    week_ago = today - timedelta(days=7)
+    
+    weekly_orders = []
+    total_sales = 0
+    
+    for uid, order in orders.items():
+        if 'date' in order:
+            order_date = datetime.fromisoformat(order['date']).date()
+            if week_ago <= order_date <= today and order.get('status') in ['delivered', 'paid', 'ready']:
+                weekly_orders.append(order)
+                total_sales += order['total']
+    
+    # فروش روزانه
+    daily_sales = {}
+    for order in weekly_orders:
+        order_date = datetime.fromisoformat(order['date']).date()
+        persian_date = jdatetime.datetime.fromgregorian(datetime=order_date).strftime("%Y/%m/%d")
+        daily_sales[persian_date] = daily_sales.get(persian_date, 0) + order['total']
+    
+    text = (
+        f"📊 گزارش فروش هفتگی\n"
+        f"📅 از {jdatetime.datetime.fromgregorian(datetime=week_ago).strftime('%Y/%m/%d')}\n"
+        f"📅 تا {jdatetime.datetime.fromgregorian(datetime=today).strftime('%Y/%m/%d')}\n\n"
+        f"💰 مجموع فروش: {total_sales} تومان\n"
+        f"📦 تعداد سفارشات: {len(weekly_orders)}\n\n"
+        f"📈 فروش روزانه:\n"
+    )
+    
+    for date, amount in daily_sales.items():
+        text += f"• {date}: {amount} تومان\n"
+    
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="admin_reports"))
+    
+    await call.message.edit_text(text, reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data == "report_monthly")
+async def report_monthly(call: CallbackQuery):
+    today = datetime.now()
+    month_ago = today - timedelta(days=30)
+    
+    monthly_orders = []
+    total_sales = 0
+    
+    for uid, order in orders.items():
+        if 'date' in order:
+            order_date = datetime.fromisoformat(order['date'])
+            if month_ago <= order_date <= today and order.get('status') in ['delivered', 'paid', 'ready']:
+                monthly_orders.append(order)
+                total_sales += order['total']
+    
+    text = (
+        f"📊 گزارش فروش ماهانه\n"
+        f"📅 30 روز اخیر\n\n"
+        f"💰 مجموع فروش: {total_sales} تومان\n"
+        f"📦 تعداد سفارشات: {len(monthly_orders)}\n"
+        f"📊 میانگین روزانه: {total_sales // 30 if total_sales else 0} تومان\n"
+    )
+    
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="admin_reports"))
+    
+    await call.message.edit_text(text, reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data == "report_total")
+async def report_total(call: CallbackQuery):
+    total_sales = 0
+    total_orders = 0
+    completed_orders = 0
+    
+    for uid, order in orders.items():
+        total_orders += 1
+        if order.get('status') in ['delivered', 'paid', 'ready']:
+            total_sales += order['total']
+            completed_orders += 1
+    
+    text = (
+        f"💰 گزارش فروش کل\n\n"
+        f"📦 کل سفارشات: {total_orders}\n"
+        f"✅ سفارشات تکمیل شده: {completed_orders}\n"
+        f"❌ سفارشات لغو شده: {total_orders - completed_orders}\n"
+        f"💰 مجموع فروش: {total_sales} تومان\n"
+    )
+    
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="admin_reports"))
+    
+    await call.message.edit_text(text, reply_markup=kb)
+
+# ===================== ADMIN USERS STATS =====================
+@dp.callback_query_handler(lambda c: c.data == "admin_users")
+async def admin_users(call: CallbackQuery):
+    total_users = len(users)
+    
+    # کاربران فعال (کسانی که سفارش داشتن)
+    active_users = set()
+    for uid, order in orders.items():
+        if order.get('status') in ['delivered', 'paid', 'ready']:
+            active_users.add(uid)
+    
+    # کاربران جدید امروز
+    today = datetime.now().date()
+    new_users_today = 0
+    for uid, user in users.items():
+        if 'register_date' in user:
+            register_date = datetime.fromisoformat(user['register_date']).date()
+            if register_date == today:
+                new_users_today += 1
+    
+    # مجموع سفارشات کاربران
+    total_orders = len([o for o in orders.values() if o.get('status') in ['delivered', 'paid', 'ready']])
+    
+    text = (
+        f"👥 آمار کاربران\n\n"
+        f"📊 کل کاربران: {total_users}\n"
+        f"🆕 کاربران جدید امروز: {new_users_today}\n"
+        f"🛒 کاربران فعال: {len(active_users)}\n"
+        f"📦 مجموع سفارشات: {total_orders}\n"
+        f"💰 میانگین سفارش به ازای کاربر: {total_orders / total_users if total_users else 0:.1f}\n\n"
+    )
+    
+    # 10 کاربر برتر
+    user_orders = {}
+    for uid, order in orders.items():
+        if order.get('status') in ['delivered', 'paid', 'ready']:
+            user_orders[uid] = user_orders.get(uid, 0) + 1
+    
+    top_users = sorted(user_orders.items(), key=lambda x: x[1], reverse=True)[:10]
+    
+    if top_users:
+        text += "🏆 کاربران برتر:\n"
+        for i, (uid, count) in enumerate(top_users, 1):
+            user = users.get(uid, {})
+            name = user.get('name', 'نامشخص')
+            text += f"{i}. {name}: {count} سفارش\n"
+    
+    kb = InlineKeyboardMarkup()
+    kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_admin"))
+    
+    await call.message.edit_text(text, reply_markup=kb)
+
+# ===================== ADMIN SETTINGS =====================
+@dp.callback_query_handler(lambda c: c.data == "admin_settings")
+async def admin_settings(call: CallbackQuery):
+    text = (
+        f"⚙️ تنظیمات رستوران\n\n"
+        f"💳 شماره کارت: {settings['card_number']}\n"
+        f"👤 صاحب کارت: {settings['card_owner']}\n"
+        f"📞 تلفن: {settings['phone']}\n"
+        f"📍 آدرس: {settings['address']}\n"
+        f"⏰ ساعت کاری: {settings['working_hours']}\n"
+        f"📷 اینستاگرام: {settings['instagram']}\n"
+    )
+    
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("💳 ویرایش شماره کارت", callback_data="edit_card_number"),
+        InlineKeyboardButton("👤 ویرایش صاحب کارت", callback_data="edit_card_owner"),
+        InlineKeyboardButton("📞 ویرایش تلفن", callback_data="edit_phone"),
+        InlineKeyboardButton("📍 ویرایش آدرس", callback_data="edit_address"),
+        InlineKeyboardButton("⏰ ویرایش ساعت کاری", callback_data="edit_hours"),
+        InlineKeyboardButton("📷 ویرایش اینستاگرام", callback_data="edit_instagram"),
+        InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_admin")
+    )
+    
+    await call.message.edit_text(text, reply_markup=kb)
+
+@dp.callback_query_handler(lambda c: c.data == "edit_card_number")
+async def edit_card_number(call: CallbackQuery, state: FSMContext):
+    await call.message.edit_text("💳 شماره کارت جدید را وارد کنید:")
+    await AdminState.waiting_for_card_number.set()
+
+@dp.message_handler(state=AdminState.waiting_for_card_number)
+async def update_card_number(message: types.Message, state: FSMContext):
+    settings['card_number'] = message.text.strip()
+    save_settings()
+    await state.finish()
+    await message.answer("✅ شماره کارت با موفقیت به‌روزرسانی شد!")
+    await admin_panel(message)
+
+@dp.callback_query_handler(lambda c: c.data == "edit_card_owner")
+async def edit_card_owner(call: CallbackQuery, state: FSMContext):
+    await call.message.edit_text("👤 نام صاحب کارت جدید را وارد کنید:")
+    await AdminState.waiting_for_card_owner.set()
+
+@dp.message_handler(state=AdminState.waiting_for_card_owner)
+async def update_card_owner(message: types.Message, state: FSMContext):
+    settings['card_owner'] = message.text.strip()
+    save_settings()
+    await state.finish()
+    await message.answer("✅ نام صاحب کارت با موفقیت به‌روزرسانی شد!")
+    await admin_panel(message)
+
+@dp.callback_query_handler(lambda c: c.data == "edit_phone")
+async def edit_phone(call: CallbackQuery, state: FSMContext):
+    await call.message.edit_text("📞 شماره تلفن جدید را وارد کنید:")
+    await AdminState.waiting_for_phone.set()
+
+@dp.message_handler(state=AdminState.waiting_for_phone)
+async def update_phone(message: types.Message, state: FSMContext):
+    settings['phone'] = message.text.strip()
+    save_settings()
+    await state.finish()
+    await message.answer("✅ شماره تلفن با موفقیت به‌روزرسانی شد!")
+    await admin_panel(message)
+
+@dp.callback_query_handler(lambda c: c.data == "edit_address")
+async def edit_address(call: CallbackQuery, state: FSMContext):
+    await call.message.edit_text("📍 آدرس جدید را وارد کنید:")
+    await AdminState.waiting_for_address.set()
+
+@dp.message_handler(state=AdminState.waiting_for_address)
+async def update_address(message: types.Message, state: FSMContext):
+    settings['address'] = message.text.strip()
+    save_settings()
+    await state.finish()
+    await message.answer("✅ آدرس با موفقیت به‌روزرسانی شد!")
+    await admin_panel(message)
+
+@dp.callback_query_handler(lambda c: c.data == "edit_hours")
+async def edit_hours(call: CallbackQuery, state: FSMContext):
+    await call.message.edit_text("⏰ ساعت کاری جدید را وارد کنید (مثال: 12 ظهر تا 12 شب):")
+    await AdminState.waiting_for_working_hours.set()
+
+@dp.message_handler(state=AdminState.waiting_for_working_hours)
+async def update_hours(message: types.Message, state: FSMContext):
+    settings['working_hours'] = message.text.strip()
+    save_settings()
+    await state.finish()
+    await message.answer("✅ ساعت کاری با موفقیت به‌روزرسانی شد!")
+    await admin_panel(message)
+
+@dp.callback_query_handler(lambda c: c.data == "edit_instagram")
+async def edit_instagram(call: CallbackQuery, state: FSMContext):
+    await call.message.edit_text("📷 آدرس اینستاگرام جدید را وارد کنید:")
+    await AdminState.waiting_for_instagram.set()
+
+@dp.message_handler(state=AdminState.waiting_for_instagram)
+async def update_instagram(message: types.Message, state: FSMContext):
+    settings['instagram'] = message.text.strip()
+    save_settings()
+    await state.finish()
+    await message.answer("✅ آدرس اینستاگرام با موفقیت به‌روزرسانی شد!")
+    await admin_panel(message)
+
+# ===================== ADMIN PENDING ORDERS =====================
+@dp.callback_query_handler(lambda c: c.data == "admin_pending")
+async def admin_pending(call: CallbackQuery):
+    pending_orders = {uid: order for uid, order in orders.items() 
+                     if order.get('status') in ['waiting_for_approval', 'payment_received']}
+    
+    if not pending_orders:
+        text = "📭 سفارش در انتظاری وجود ندارد."
+        kb = InlineKeyboardMarkup()
+        kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_admin"))
+        await call.message.edit_text(text, reply_markup=kb)
+        return
+    
+    text = f"⏳ سفارشات در انتظار ({len(pending_orders)})\n\n"
+    
+    kb = InlineKeyboardMarkup(row_width=1)
+    for uid, order in pending_orders.items():
+        button_text = f"{users[uid]['name']} - {order['total']} تومان"
+        kb.add(InlineKeyboardButton(button_text, callback_data=f"view_order:{uid}"))
+    
+    kb.add(InlineKeyboardButton("🔙 بازگشت", callback_data="back_to_admin"))
+    
+    await call.message.edit_text(text, reply_markup=kb)
+
+# ===================== BACK TO ADMIN =====================
+@dp.callback_query_handler(lambda c: c.data == "back_to_admin")
+async def back_to_admin(call: CallbackQuery):
+    await admin_panel(call.message)
+
 # ===================== FOOD MENU =====================
 @dp.message_handler(lambda m: m.text == "🍽 منوی غذا")
 async def food_menu(message: types.Message):
     uid = message.from_user.id
     
+    # اگر ادمین است
+    if uid in ADMIN_IDS:
+        await admin_panel(message)
+        return
+    
+    # اگر کاربر عادی است
     if str(uid) not in users and uid not in users:
         await start(message)
         return
@@ -210,6 +855,11 @@ async def food_menu(message: types.Message):
 # ===================== SELECT FOOD =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("select_food:"))
 async def select_food(call: CallbackQuery, state: FSMContext):
+    # اگر ادمین است اجازه سفارش نده
+    if call.from_user.id in ADMIN_IDS:
+        await call.answer("⚠️ مدیران نمی‌توانند سفارش دهند!", show_alert=True)
+        return
+    
     food = call.data.split(":")[1]
     
     await state.update_data(selected_food=food)
@@ -236,6 +886,12 @@ async def select_food(call: CallbackQuery, state: FSMContext):
 # ===================== ADD TO CART =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("qty:"), state=OrderState.waiting_for_quantity)
 async def add_to_cart_with_qty(call: CallbackQuery, state: FSMContext):
+    # اگر ادمین است اجازه نده
+    if call.from_user.id in ADMIN_IDS:
+        await state.finish()
+        await call.answer("⚠️ مدیران نمی‌توانند سفارش دهند!", show_alert=True)
+        return
+    
     qty = int(call.data.split(":")[1])
     data = await state.get_data()
     food = data.get('selected_food')
@@ -274,9 +930,38 @@ async def add_to_cart_with_qty(call: CallbackQuery, state: FSMContext):
         reply_markup=kb
     )
 
+# ===================== BACK TO MENU =====================
+@dp.callback_query_handler(lambda c: c.data == "back_to_menu")
+async def back_to_menu(call: CallbackQuery):
+    uid = call.from_user.id
+    
+    text = "🍽 منوی غذا:\n\n"
+    for food, price in MENU.items():
+        text += f"• {food}: {price} تومان\n"
+    
+    kb = InlineKeyboardMarkup(row_width=1)
+    
+    for food, price in MENU.items():
+        button_text = f"🍽 {food} - {price} تومان"
+        kb.add(InlineKeyboardButton(button_text, callback_data=f"select_food:{food}"))
+    
+    if uid in carts and carts[uid]:
+        total_items = sum(carts[uid].values())
+        total_price = sum(MENU[f] * q for f, q in carts[uid].items())
+        kb.add(InlineKeyboardButton(f"🛒 مشاهده سبد خرید ({total_items} آیتم - {total_price} تومان)", callback_data="cart"))
+    else:
+        kb.add(InlineKeyboardButton("🛒 مشاهده سبد خرید (خالی)", callback_data="cart"))
+    
+    await call.message.edit_text(text, reply_markup=kb)
+
 # ===================== CHANGE QUANTITY =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("change_qty:"))
 async def change_quantity(call: CallbackQuery):
+    # اگر ادمین است اجازه نده
+    if call.from_user.id in ADMIN_IDS:
+        await call.answer("⚠️ مدیران نمی‌توانند سفارش دهند!", show_alert=True)
+        return
+    
     food = call.data.split(":")[1]
     uid = call.from_user.id
     
@@ -315,6 +1000,11 @@ async def change_quantity(call: CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("set_qty:"))
 async def set_quantity(call: CallbackQuery):
+    # اگر ادمین است اجازه نده
+    if call.from_user.id in ADMIN_IDS:
+        await call.answer("⚠️ مدیران نمی‌توانند سفارش دهند!", show_alert=True)
+        return
+    
     _, food, qty = call.data.split(":")
     uid = call.from_user.id
     
@@ -328,6 +1018,11 @@ async def set_quantity(call: CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("increase_qty:"))
 async def increase_quantity(call: CallbackQuery):
+    # اگر ادمین است اجازه نده
+    if call.from_user.id in ADMIN_IDS:
+        await call.answer("⚠️ مدیران نمی‌توانند سفارش دهند!", show_alert=True)
+        return
+    
     food = call.data.split(":")[1]
     uid = call.from_user.id
     
@@ -341,6 +1036,11 @@ async def increase_quantity(call: CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("decrease_qty:"))
 async def decrease_quantity(call: CallbackQuery):
+    # اگر ادمین است اجازه نده
+    if call.from_user.id in ADMIN_IDS:
+        await call.answer("⚠️ مدیران نمی‌توانند سفارش دهند!", show_alert=True)
+        return
+    
     food = call.data.split(":")[1]
     uid = call.from_user.id
     
@@ -354,34 +1054,15 @@ async def decrease_quantity(call: CallbackQuery):
     else:
         await delete_item(call)
 
-# ===================== BACK TO MENU =====================
-@dp.callback_query_handler(lambda c: c.data == "back_to_menu")
-async def back_to_menu(call: CallbackQuery):
-    uid = call.from_user.id
-    
-    text = "🍽 منوی غذا:\n\n"
-    for food, price in MENU.items():
-        text += f"• {food}: {price} تومان\n"
-    
-    kb = InlineKeyboardMarkup(row_width=1)
-    
-    for food, price in MENU.items():
-        button_text = f"🍽 {food} - {price} تومان"
-        kb.add(InlineKeyboardButton(button_text, callback_data=f"select_food:{food}"))
-    
-    if uid in carts and carts[uid]:
-        total_items = sum(carts[uid].values())
-        total_price = sum(MENU[f] * q for f, q in carts[uid].items())
-        kb.add(InlineKeyboardButton(f"🛒 مشاهده سبد خرید ({total_items} آیتم - {total_price} تومان)", callback_data="cart"))
-    else:
-        kb.add(InlineKeyboardButton("🛒 مشاهده سبد خرید (خالی)", callback_data="cart"))
-    
-    await call.message.edit_text(text, reply_markup=kb)
-
 # ===================== CART =====================
 @dp.callback_query_handler(lambda c: c.data == "cart")
 async def show_cart(call: CallbackQuery):
     uid = call.from_user.id
+    
+    # اگر ادمین است اجازه نده
+    if uid in ADMIN_IDS:
+        await call.answer("⚠️ مدیران نمی‌توانند سفارش دهند!", show_alert=True)
+        return
     
     if uid not in carts:
         carts[uid] = {}
@@ -415,6 +1096,11 @@ async def show_cart(call: CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("del:"))
 async def delete_item(call: CallbackQuery):
+    # اگر ادمین است اجازه نده
+    if call.from_user.id in ADMIN_IDS:
+        await call.answer("⚠️ مدیران نمی‌توانند سفارش دهند!", show_alert=True)
+        return
+    
     food = call.data.split(":")[1]
     uid = call.from_user.id
     
@@ -426,6 +1112,11 @@ async def delete_item(call: CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data == "clear_cart")
 async def clear_cart(call: CallbackQuery):
+    # اگر ادمین است اجازه نده
+    if call.from_user.id in ADMIN_IDS:
+        await call.answer("⚠️ مدیران نمی‌توانند سفارش دهند!", show_alert=True)
+        return
+    
     uid = call.from_user.id
     carts[uid] = {}
     save_carts()
@@ -440,6 +1131,11 @@ async def clear_cart(call: CallbackQuery):
 async def confirm(call: CallbackQuery):
     uid = call.from_user.id
     
+    # اگر ادمین است اجازه نده
+    if uid in ADMIN_IDS:
+        await call.answer("⚠️ مدیران نمی‌توانند سفارش دهند!", show_alert=True)
+        return
+    
     if uid not in carts or not carts[uid]:
         await call.message.edit_text("❌ سبد خرید شما خالی است!")
         return
@@ -451,9 +1147,15 @@ async def confirm(call: CallbackQuery):
         "total": total,
         "method": None,
         "status": "pending",
-        "date": str(call.message.date)
+        "date": str(datetime.now())
     }
     save_orders()
+    
+    # به‌روزرسانی آمار کاربر
+    if uid in users:
+        users[uid]['total_orders'] = users[uid].get('total_orders', 0) + 1
+        users[uid]['total_spent'] = users[uid].get('total_spent', 0) + total
+        save_users()
     
     kb = InlineKeyboardMarkup(row_width=1)
     kb.add(
@@ -484,7 +1186,7 @@ async def pay_cash(call: CallbackQuery):
     
     items_text = "\n".join([f"• {k} × {v}" for k, v in carts[uid].items()])
     
-    # ارسال به ادمین
+    # ارسال به ادمین‌ها
     for admin in ADMIN_IDS:
         kb = InlineKeyboardMarkup(row_width=2)
         kb.add(
@@ -538,8 +1240,8 @@ async def pay_card(call: CallbackQuery, state: FSMContext):
     await call.message.edit_text(
         f"💳 پرداخت کارت به کارت\n\n"
         f"🏦 اطلاعات کارت:\n"
-        f"💳 شماره کارت: {CARD_NUMBER}\n"
-        f"👤 به نام: {CARD_OWNER}\n\n"
+        f"💳 شماره کارت: {settings['card_number']}\n"
+        f"👤 به نام: {settings['card_owner']}\n\n"
         f"💰 مبلغ قابل پرداخت: {orders[uid]['total']} تومان\n\n"
         f"📸 لطفاً پس از واریز، تصویر فیش پرداخت را ارسال کنید.\n"
         f"⚠️ حتماً رسید پرداخت را به وضوح ارسال نمایید.",
@@ -568,8 +1270,8 @@ async def pay_delivery(call: CallbackQuery, state: FSMContext):
         f"🚚 ارسال با پیک\n\n"
         f"برای ارسال سفارش با پیک:\n\n"
         f"1️⃣ مبلغ {orders[uid]['total']} تومان را به کارت زیر واریز کنید:\n"
-        f"💳 {CARD_NUMBER}\n"
-        f"👤 {CARD_OWNER}\n\n"
+        f"💳 {settings['card_number']}\n"
+        f"👤 {settings['card_owner']}\n\n"
         f"2️⃣ تصویر فیش پرداخت را ارسال کنید\n"
         f"3️⃣ آدرس دقیق خود را وارد کنید\n\n"
         f"📸 لطفاً پس از واریز، تصویر فیش را ارسال کنید:",
@@ -606,7 +1308,7 @@ async def receive_receipt(message: types.Message, state: FSMContext):
     
     items_text = "\n".join([f"• {k} × {v}" for k, v in orders[uid]['items'].items()])
     
-    # ارسال فیش به ادمین
+    # ارسال فیش به ادمین‌ها
     for admin in ADMIN_IDS:
         kb = InlineKeyboardMarkup(row_width=2)
         kb.add(
@@ -646,6 +1348,10 @@ async def receive_receipt(message: types.Message, state: FSMContext):
 # ===================== ADMIN APPROVALS =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("approve_order:"))
 async def approve_order(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        await call.answer("❌ دسترسی غیرمجاز")
+        return
+    
     uid = int(call.data.split(":")[1])
     
     if uid in orders:
@@ -659,14 +1365,25 @@ async def approve_order(call: CallbackQuery):
             "⏳ لطفاً منتظر بمانید"
         )
     
-    # حذف دکمه‌ها و نمایش پیام تأیید
+    # اضافه کردن دکمه‌های بعدی
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("✅ غذا آماده شد", callback_data=f"ready:{uid}"),
+        InlineKeyboardButton("🏁 اتمام سفارش", callback_data=f"complete_order:{uid}")
+    )
+    
     await call.message.edit_text(
-        call.message.text + "\n\n✅ سفارش تأیید شد"
+        call.message.text + "\n\n✅ سفارش تأیید شد",
+        reply_markup=kb
     )
     await call.answer("✅ سفارش تأیید شد")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("reject_order:"))
 async def reject_order(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        await call.answer("❌ دسترسی غیرمجاز")
+        return
+    
     uid = int(call.data.split(":")[1])
     
     if uid in orders:
@@ -676,10 +1393,9 @@ async def reject_order(call: CallbackQuery):
     await bot.send_message(
         uid,
         "❌ متأسفانه سفارش شما رد شد!\n"
-        "لطفاً با پشتیبانی تماس بگیرید: 09141604866"
+        "لطفاً با پشتیبانی تماس بگیرید: {settings['phone']}"
     )
     
-    # حذف دکمه‌ها و نمایش پیام رد
     await call.message.edit_text(
         call.message.text + "\n\n❌ سفارش رد شد"
     )
@@ -687,6 +1403,10 @@ async def reject_order(call: CallbackQuery):
 
 @dp.callback_query_handler(lambda c: c.data.startswith("approve_payment:"))
 async def approve_payment(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        await call.answer("❌ دسترسی غیرمجاز")
+        return
+    
     uid = int(call.data.split(":")[1])
     
     if uid in orders:
@@ -700,14 +1420,25 @@ async def approve_payment(call: CallbackQuery):
             "⏳ لطفاً منتظر بمانید"
         )
     
-    # حذف دکمه‌ها و نمایش پیام تأیید
+    # اضافه کردن دکمه‌های بعدی
+    kb = InlineKeyboardMarkup(row_width=2)
+    kb.add(
+        InlineKeyboardButton("✅ غذا آماده شد", callback_data=f"ready:{uid}"),
+        InlineKeyboardButton("🏁 اتمام سفارش", callback_data=f"complete_order:{uid}")
+    )
+    
     await call.message.edit_caption(
-        call.message.caption + "\n\n✅ پرداخت تأیید شد"
+        call.message.caption + "\n\n✅ پرداخت تأیید شد",
+        reply_markup=kb
     )
     await call.answer("✅ پرداخت تأیید شد")
 
 @dp.callback_query_handler(lambda c: c.data.startswith("reject_payment:"))
 async def reject_payment(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        await call.answer("❌ دسترسی غیرمجاز")
+        return
+    
     uid = int(call.data.split(":")[1])
     
     if uid in orders:
@@ -716,22 +1447,24 @@ async def reject_payment(call: CallbackQuery):
     
     await bot.send_message(
         uid,
-        "❌ پرداخت شما رد شد!\n\n"
-        "💳 لطفاً مجدداً تلاش کنید:\n"
-        f"{CARD_NUMBER}\n"
-        f"{CARD_OWNER}\n\n"
-        "یا با پشتیبانی تماس بگیرید: 09141604866"
+        f"❌ پرداخت شما رد شد!\n\n"
+        f"💳 لطفاً مجدداً تلاش کنید:\n"
+        f"{settings['card_number']}\n"
+        f"{settings['card_owner']}\n\n"
+        f"یا با پشتیبانی تماس بگیرید: {settings['phone']}"
     )
     
-    # حذف دکمه‌ها و نمایش پیام رد
     await call.message.edit_caption(
         call.message.caption + "\n\n❌ پرداخت رد شد"
     )
     await call.answer("❌ پرداخت رد شد")
 
-# ===================== ORDER READY =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("ready:"))
 async def order_ready(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        await call.answer("❌ دسترسی غیرمجاز")
+        return
+    
     uid = int(call.data.split(":")[1])
     
     if uid in orders:
@@ -754,9 +1487,12 @@ async def order_ready(call: CallbackQuery):
     )
     await call.answer("✅ اطلاع‌رسانی شد")
 
-# ===================== COMPLETE ORDER =====================
 @dp.callback_query_handler(lambda c: c.data.startswith("complete_order:"))
 async def complete_order(call: CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        await call.answer("❌ دسترسی غیرمجاز")
+        return
+    
     uid = int(call.data.split(":")[1])
     
     if uid in orders:
@@ -774,7 +1510,6 @@ async def complete_order(call: CallbackQuery):
             "🌟 منتظر حضور دوباره شما هستیم"
         )
     
-    # حذف دکمه و نمایش پیام اتمام
     await call.message.edit_text(
         call.message.text + "\n\n🏁 سفارش به پایان رسید"
     )
@@ -783,22 +1518,44 @@ async def complete_order(call: CallbackQuery):
 # ===================== HELPERS =====================
 @dp.message_handler(commands=["help"])
 async def help_command(message: types.Message):
-    await message.answer(
-        "🤖 راهنمای ربات:\n\n"
-        "• /start - شروع مجدد\n"
-        "• منوی غذا - مشاهده منو و سفارش\n"
-        "• تماس با ما - اطلاعات تماس\n"
-        "• اینستاگرام - صفحه اینستاگرام\n"
-        "• وضعیت سفارش - بررسی وضعیت سفارش\n\n"
-        "برای هر سوال با پشتیبانی تماس بگیرید: 09141604866"
-    )
+    uid = message.from_user.id
+    
+    if uid in ADMIN_IDS:
+        await message.answer(
+            "🤖 راهنمای مدیر:\n\n"
+            "• /start - شروع مجدد\n"
+            "• پنل مدیریت - دسترسی به پنل مدیریت\n"
+            "• منوی غذا - مشاهده منو (برای مدیران قابل سفارش نیست)\n"
+            "• وضعیت سفارش - بررسی وضعیت سفارش‌ها\n\n"
+            "در پنل مدیریت می‌توانید:\n"
+            "- منو را مدیریت کنید (افزودن/ویرایش/حذف)\n"
+            "- سفارشات را مدیریت کنید\n"
+            "- گزارش فروش بگیرید\n"
+            "- آمار کاربران را ببینید\n"
+            "- تنظیمات را تغییر دهید"
+        )
+    else:
+        await message.answer(
+            "🤖 راهنمای ربات:\n\n"
+            "• /start - شروع مجدد\n"
+            "• منوی غذا - مشاهده منو و سفارش\n"
+            "• تماس با ما - اطلاعات تماس\n"
+            "• اینستاگرام - صفحه اینستاگرام\n"
+            "• وضعیت سفارش - بررسی وضعیت سفارش\n\n"
+            f"برای هر سوال با پشتیبانی تماس بگیرید: {settings['phone']}"
+        )
 
 # ===================== FALLBACK =====================
 @dp.message_handler()
 async def fallback(message: types.Message):
     uid = message.from_user.id
     
-    if str(uid) not in users and uid not in users:
+    if uid in ADMIN_IDS:
+        await message.answer(
+            "❌ دستور نامعتبر!\n"
+            "لطفاً از دکمه‌های زیر استفاده کنید"
+        )
+    elif str(uid) not in users and uid not in users:
         await start(message)
     else:
         await message.answer(
@@ -808,7 +1565,16 @@ async def fallback(message: types.Message):
 
 # ===================== RUN =====================
 if __name__ == "__main__":
+    # نصب کتابخانه jdatetime اگر نصب نیست
+    try:
+        import jdatetime
+    except ImportError:
+        os.system("pip install jdatetime")
+        import jdatetime
+    
     print("🤖 ربات در حال اجرا است...")
-    print(f"📊 تعداد کاربران: {len(users)}")
+    print(f"👤 تعداد کاربران: {len(users)}")
     print(f"🛒 تعداد سبدهای فعال: {len(carts)}")
+    print(f"📦 تعداد سفارشات: {len(orders)}")
+    print(f"👑 ادمین‌ها: {ADMIN_IDS}")
     executor.start_polling(dp, skip_updates=True)
