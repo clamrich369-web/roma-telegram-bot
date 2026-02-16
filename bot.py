@@ -9,7 +9,7 @@ import os
 
 logging.basicConfig(level=logging.INFO)
 
-TOKEN = "PUT_YOUR_TOKEN"
+TOKEN = "8543932711:AAFBzavfn2MunYAvnCKWiAEisUIyEmT04XQ"
 ADMIN_IDS = [289763127]
 
 bot = Bot(token=TOKEN)
