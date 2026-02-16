@@ -207,12 +207,20 @@ async def confirm(call):
         "items": carts[uid],
         "total": total
     }
-
-    kb = InlineKeyboardMarkup()
-    kb.add(
-        InlineKeyboardButton("💳 کارت به کارت", callback_data="card"),
-        InlineKeyboardButton("💵 پرداخت حضوری", callback_data="pay_cash")
+@dp.callback_query_handler(lambda c: c.data == "pay_delivery")
+async def pay_delivery(call: CallbackQuery):
+    await call.message.answer(
+        "📌 لطفاً مبلغ سفارش را کارت به کارت کرده و فیش پرداختی را ارسال کنید."
     )
+    await call.answer()
+
+   payment_kb = InlineKeyboardMarkup(row_width=1)
+payment_kb.add(
+    InlineKeyboardButton("💵 پرداخت حضوری", callback_data="pay_cash"),
+    InlineKeyboardButton("💳 کارت به کارت", callback_data="pay_card"),
+    InlineKeyboardButton("🚚 ارسال به پیک", callback_data="pay_delivery")
+)
+
 
     await call.message.edit_text(
         f"💰 مبلغ قابل پرداخت: {total}\nروش پرداخت را انتخاب کنید:",
@@ -332,6 +340,26 @@ async def receipt(message):
         InlineKeyboardButton("✅ تایید پرداخت", callback_data=f"pay_ok:{uid}"),
         InlineKeyboardButton("❌ رد پرداخت", callback_data=f"pay_no:{uid}")
     )
+    
+@dp.message_handler(content_types=types.ContentType.PHOTO)
+async def receive_receipt(message: types.Message):
+    order_id = get_user_order_id(message.from_user.id)  # تابع خودت
+    save_receipt(order_id, message.photo[-1].file_id)   # ذخیره فیش
+
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton("✅ تایید پرداخت", callback_data=f"approve_{order_id}"),
+        InlineKeyboardButton("❌ رد پرداخت", callback_data=f"reject_{order_id}")
+    )
+
+    await bot.send_photo(
+        ADMIN_ID,
+        message.photo[-1].file_id,
+        caption=f"📥 فیش پرداختی جدید\n🆔 سفارش: {order_id}",
+        reply_markup=kb
+    )
+
+    await message.answer("⏳ فیش شما ارسال شد، منتظر تایید مدیریت باشید.")
 
     for admin in ADMIN_IDS:
         await bot.send_photo(
@@ -349,6 +377,29 @@ async def receipt(message):
         )
 
     await message.answer("⏳ فیش شما برای ادمین ارسال شد و در حال بررسی است")
+    
+@dp.callback_query_handler(lambda c: c.data.startswith("approve_"))
+async def approve_payment(call: CallbackQuery):
+    order_id = call.data.split("_")[1]
+    user_id = get_order_user(order_id)
+
+    await bot.send_message(
+        user_id,
+        "✅ پرداخت شما تایید شد.\n🚚 پیک با شما تماس خواهد گرفت."
+    )
+
+    kb = InlineKeyboardMarkup()
+    kb.add(
+        InlineKeyboardButton(
+            "📦 تحویل به پیک",
+            callback_data=f"delivered_to_courier_{order_id}"
+        )
+    )
+
+    await call.message.edit_caption(
+        call.message.caption + "\n\n✅ پرداخت تایید شد",
+        reply_markup=kb
+    )
 
 @dp.callback_query_handler(lambda c: c.data.startswith("delivered:"))
 async def delivered_order(call: types.CallbackQuery):
@@ -372,6 +423,36 @@ async def delivered_order(call: types.CallbackQuery):
         kb.insert(
             InlineKeyboardButton(f"⭐ {i}", callback_data=f"rate:{uid}:{i}")
         )
+        
+        @dp.callback_query_handler(lambda c: c.data.startswith("delivered_to_courier_"))
+async def delivered_to_courier(call: CallbackQuery):
+    order_id = call.data.split("_")[3]
+    user_id = get_order_user(order_id)
+
+    await bot.send_message(
+        user_id,
+        "🚚 غذای شما به پیک تحویل داده شد.\n📞 پیک با شما تماس می‌گیرد."
+    )
+
+    await call.message.edit_caption(
+        call.message.caption + "\n\n🚚 تحویل پیک شد",
+        reply_markup=None
+    )
+
+@dp.callback_query_handler(lambda c: c.data.startswith("reject_"))
+async def reject_payment(call: CallbackQuery):
+    order_id = call.data.split("_")[1]
+    user_id = get_order_user(order_id)
+
+    await bot.send_message(
+        user_id,
+        "❌ فیش پرداختی شما رد شد.\nلطفاً دوباره پرداخت و فیش صحیح ارسال کنید."
+    )
+
+    await call.message.edit_caption(
+        call.message.caption + "\n\n❌ پرداخت رد شد",
+        reply_markup=None
+    )
 
     await bot.send_message(
         uid,
@@ -415,6 +496,26 @@ async def food_ready(call: types.CallbackQuery):
 
     await call.answer("پیام ارسال شد")
     
+    @dp.message_handler(commands=["close_order"])
+async def close_order(message: types.Message):
+    kb = InlineKeyboardMarkup(row_width=5)
+    for i in range(1, 6):
+        kb.insert(
+            InlineKeyboardButton(f"⭐ {i}", callback_data=f"rate_{i}")
+        )
+
+    await message.answer(
+        "🙏 ممنون که ما رو انتخاب کردید\nلطفاً به ما امتیاز بدید:",
+        reply_markup=kb
+    )
+    
+@dp.callback_query_handler(lambda c: c.data.startswith("rate_"))
+async def rate(call: CallbackQuery):
+    rate = call.data.split("_")[1]
+    save_rate(call.from_user.id, rate)
+
+    await call.message.edit_text("❤️ ممنون از امتیاز شما")
+
 @dp.callback_query_handler(lambda c: c.data.startswith("rate:"))
 async def rate(call: types.CallbackQuery):
     _, uid, score = call.data.split(":")
@@ -437,4 +538,3 @@ async def rate(call: types.CallbackQuery):
 # ===================== RUN =====================
 if __name__ == "__main__":
     executor.start_polling(dp, skip_updates=True)
-
