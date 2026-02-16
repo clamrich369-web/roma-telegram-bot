@@ -213,13 +213,17 @@ async def pay_delivery(call: CallbackQuery):
         "📌 لطفاً مبلغ سفارش را کارت به کارت کرده و فیش پرداختی را ارسال کنید."
     )
     await call.answer()
+    
+@dp.callback_query_handler(lambda c: c.data == "choose_payment")
+async def choose_payment(call: CallbackQuery):
+    payment_kb = InlineKeyboardMarkup(row_width=1)
+    payment_kb.add(
+        InlineKeyboardButton("💵 پرداخت حضوری", callback_data="pay_cash"),
+        InlineKeyboardButton("💳 کارت به کارت", callback_data="pay_card"),
+        InlineKeyboardButton("🚚 ارسال به پیک", callback_data="pay_delivery")
+    )
 
-   payment_kb = InlineKeyboardMarkup(row_width=1)
-payment_kb.add(
-    InlineKeyboardButton("💵 پرداخت حضوری", callback_data="pay_cash"),
-    InlineKeyboardButton("💳 کارت به کارت", callback_data="pay_card"),
-    InlineKeyboardButton("🚚 ارسال به پیک", callback_data="pay_delivery")
-)
+    await call.message.answer("روش پرداخت را انتخاب کنید:", reply_markup=payment_kb)
 
 
     await call.message.edit_text(
