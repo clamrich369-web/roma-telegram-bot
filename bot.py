@@ -500,7 +500,7 @@ async def food_ready(call: types.CallbackQuery):
 
     await call.answer("پیام ارسال شد")
     
-    @dp.message_handler(commands=["close_order"])
+@dp.message_handler(commands=["close_order"])
 async def close_order(message: types.Message):
     kb = InlineKeyboardMarkup(row_width=5)
     for i in range(1, 6):
