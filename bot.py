@@ -7,7 +7,6 @@ import logging
 import json
 import os
 from datetime import datetime, timedelta
-import jdatetime  # برای تاریخ شمسی
 
 logging.basicConfig(level=logging.INFO)
 
@@ -238,13 +237,12 @@ async def check_order_status(message: types.Message):
         
         order_items = "\n".join([f"• {k} × {v}" for k, v in orders[uid]['items'].items()])
         
-        # تاریخ شمسی
-        order_date = datetime.fromisoformat(orders[uid]['date'])
-        persian_date = jdatetime.datetime.fromgregorian(datetime=order_date).strftime("%Y/%m/%d - %H:%M")
+        # تاریخ میلادی
+        order_date = datetime.fromisoformat(orders[uid]['date']).strftime("%Y-%m-%d %H:%M")
         
         await message.answer(
             f"📊 وضعیت سفارش شما: {text}\n"
-            f"📅 تاریخ: {persian_date}\n\n"
+            f"📅 تاریخ: {order_date}\n\n"
             f"📝 سفارش:\n{order_items}\n"
             f"💰 مبلغ: {orders[uid]['total']} تومان"
         )
@@ -518,11 +516,9 @@ async def report_daily(call: CallbackQuery):
                 daily_orders.append(order)
                 total_sales += order['total']
     
-    persian_date = jdatetime.datetime.fromgregorian(datetime=today).strftime("%Y/%m/%d")
-    
     text = (
         f"📊 گزارش فروش روزانه\n"
-        f"📅 تاریخ: {persian_date}\n\n"
+        f"📅 تاریخ: {today.strftime('%Y-%m-%d')}\n\n"
         f"💰 مجموع فروش: {total_sales} تومان\n"
         f"📦 تعداد سفارشات: {len(daily_orders)}\n\n"
     )
@@ -556,13 +552,12 @@ async def report_weekly(call: CallbackQuery):
     daily_sales = {}
     for order in weekly_orders:
         order_date = datetime.fromisoformat(order['date']).date()
-        persian_date = jdatetime.datetime.fromgregorian(datetime=order_date).strftime("%Y/%m/%d")
-        daily_sales[persian_date] = daily_sales.get(persian_date, 0) + order['total']
+        daily_sales[str(order_date)] = daily_sales.get(str(order_date), 0) + order['total']
     
     text = (
         f"📊 گزارش فروش هفتگی\n"
-        f"📅 از {jdatetime.datetime.fromgregorian(datetime=week_ago).strftime('%Y/%m/%d')}\n"
-        f"📅 تا {jdatetime.datetime.fromgregorian(datetime=today).strftime('%Y/%m/%d')}\n\n"
+        f"📅 از {week_ago.strftime('%Y-%m-%d')}\n"
+        f"📅 تا {today.strftime('%Y-%m-%d')}\n\n"
         f"💰 مجموع فروش: {total_sales} تومان\n"
         f"📦 تعداد سفارشات: {len(weekly_orders)}\n\n"
         f"📈 فروش روزانه:\n"
@@ -1392,8 +1387,8 @@ async def reject_order(call: CallbackQuery):
     
     await bot.send_message(
         uid,
-        "❌ متأسفانه سفارش شما رد شد!\n"
-        "لطفاً با پشتیبانی تماس بگیرید: {settings['phone']}"
+        f"❌ متأسفانه سفارش شما رد شد!\n"
+        f"لطفاً با پشتیبانی تماس بگیرید: {settings['phone']}"
     )
     
     await call.message.edit_text(
@@ -1565,13 +1560,6 @@ async def fallback(message: types.Message):
 
 # ===================== RUN =====================
 if __name__ == "__main__":
-    # نصب کتابخانه jdatetime اگر نصب نیست
-    try:
-        import jdatetime
-    except ImportError:
-        os.system("pip install jdatetime")
-        import jdatetime
-    
     print("🤖 ربات در حال اجرا است...")
     print(f"👤 تعداد کاربران: {len(users)}")
     print(f"🛒 تعداد سبدهای فعال: {len(carts)}")
