@@ -33,19 +33,14 @@ def load_data():
         with open(MENU_FILE, 'r', encoding='utf-8') as f:
             MENU = json.load(f)
     else:
-        MENU ={
-    "آلفردو": 450,
-    "آناکاردی": 480,
-    "پینو": 480,
-    "بولونز": 450,
-    "ماتریچیانا": 520,
-    "گامبرتی (میگو)": 550,
-    "لازانیا": 580,
-    "پیتزا استیک گوشت": 690,
-    "پیتزا مرغ": 580,
-    "پیتزا پپرونی": 580,
-    "نوشابه": 60
-}
+        MENU = {
+            "آلفردو": 450,
+            "بولونز": 450,
+            "پیتزا مرغ": 580,
+            "پیتزا پپرونی": 580,
+            "لازانیا": 580,
+            "نوشابه": 50
+        }
         save_menu()
     
     # بارگذاری تنظیمات
@@ -1372,8 +1367,10 @@ async def approve_order(call: CallbackQuery):
         InlineKeyboardButton("🏁 اتمام سفارش", callback_data=f"complete_order:{uid}")
     )
     
+    # بررسی کنید که آیا متن وجود دارد یا خیر
+    current_text = call.message.text or call.message.caption or ""
     await call.message.edit_text(
-        call.message.text + "\n\n✅ سفارش تأیید شد",
+        current_text + "\n\n✅ سفارش تأیید شد",
         reply_markup=kb
     )
     await call.answer("✅ سفارش تأیید شد")
@@ -1396,8 +1393,10 @@ async def reject_order(call: CallbackQuery):
         f"لطفاً با پشتیبانی تماس بگیرید: {settings['phone']}"
     )
     
+    # بررسی کنید که آیا متن وجود دارد یا خیر
+    current_text = call.message.text or call.message.caption or ""
     await call.message.edit_text(
-        call.message.text + "\n\n❌ سفارش رد شد"
+        current_text + "\n\n❌ سفارش رد شد"
     )
     await call.answer("❌ سفارش رد شد")
 
@@ -1427,8 +1426,10 @@ async def approve_payment(call: CallbackQuery):
         InlineKeyboardButton("🏁 اتمام سفارش", callback_data=f"complete_order:{uid}")
     )
     
+    # برای پیام‌های عکس از caption استفاده می‌کنیم
+    current_caption = call.message.caption or ""
     await call.message.edit_caption(
-        call.message.caption + "\n\n✅ پرداخت تأیید شد",
+        current_caption + "\n\n✅ پرداخت تأیید شد",
         reply_markup=kb
     )
     await call.answer("✅ پرداخت تأیید شد")
@@ -1454,8 +1455,10 @@ async def reject_payment(call: CallbackQuery):
         f"یا با پشتیبانی تماس بگیرید: {settings['phone']}"
     )
     
+    # برای پیام‌های عکس از caption استفاده می‌کنیم
+    current_caption = call.message.caption or ""
     await call.message.edit_caption(
-        call.message.caption + "\n\n❌ پرداخت رد شد"
+        current_caption + "\n\n❌ پرداخت رد شد"
     )
     await call.answer("❌ پرداخت رد شد")
 
@@ -1471,18 +1474,31 @@ async def order_ready(call: CallbackQuery):
         orders[uid]["status"] = "ready"
         save_orders()
         
-        await bot.send_message(
-            uid,
-            "✅ سفارش شما آماده است!\n\n"
-            "🍝 می‌توانید برای تحویل سفارش خود مراجعه کنید"
-        )
+        # بررسی روش پرداخت و ارسال پیام مناسب
+        if orders[uid].get("method") == "delivery":
+            # اگر روش ارسال با پیک است
+            await bot.send_message(
+                uid,
+                "✅ غذا به پیک تحویل داده شد!\n\n"
+                "📞 همکاران ما به زودی با شما تماس می‌گیرند\n"
+                "📍 لطفاً منتظر تماس پیک باشید"
+            )
+        else:
+            # اگر روش‌های دیگر (حضوری یا کارت به کارت)
+            await bot.send_message(
+                uid,
+                "✅ سفارش شما آماده است!\n\n"
+                "🍝 می‌توانید برای تحویل سفارش خود مراجعه کنید"
+            )
     
     # اضافه کردن دکمه اتمام سفارش
     kb = InlineKeyboardMarkup()
     kb.add(InlineKeyboardButton("🏁 اتمام سفارش", callback_data=f"complete_order:{uid}"))
     
+    # بررسی کنید که آیا متن وجود دارد یا خیر
+    current_text = call.message.text or call.message.caption or ""
     await call.message.edit_text(
-        call.message.text + "\n\n✅ غذا آماده شد",
+        current_text + "\n\n✅ غذا آماده شد",
         reply_markup=kb
     )
     await call.answer("✅ اطلاع‌رسانی شد")
@@ -1503,15 +1519,27 @@ async def complete_order(call: CallbackQuery):
             carts[uid] = {}
             save_carts()
         
-        await bot.send_message(
-            uid,
-            "✅ سفارش شما با موفقیت تحویل داده شد!\n\n"
-            "🍝 از انتخاب رستوران ROMA سپاسگزاریم\n"
-            "🌟 منتظر حضور دوباره شما هستیم"
-        )
+        # بررسی روش پرداخت برای پیام نهایی
+        if orders[uid].get("method") == "delivery":
+            await bot.send_message(
+                uid,
+                "✅ سفارش شما با موفقیت تحویل داده شد!\n\n"
+                "🍝 از انتخاب رستوران ROMA سپاسگزاریم\n"
+                "🌟 منتظر حضور دوباره شما هستیم\n\n"
+                "📞 اگر مشکلی بود با پشتیبانی تماس بگیرید"
+            )
+        else:
+            await bot.send_message(
+                uid,
+                "✅ سفارش شما با موفقیت تحویل داده شد!\n\n"
+                "🍝 از انتخاب رستوران ROMA سپاسگزاریم\n"
+                "🌟 منتظر حضور دوباره شما هستیم"
+            )
     
+    # بررسی کنید که آیا متن وجود دارد یا خیر
+    current_text = call.message.text or call.message.caption or ""
     await call.message.edit_text(
-        call.message.text + "\n\n🏁 سفارش به پایان رسید"
+        current_text + "\n\n🏁 سفارش به پایان رسید"
     )
     await call.answer("✅ سفارش کامل شد")
 
