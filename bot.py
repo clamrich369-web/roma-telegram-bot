@@ -33,19 +33,14 @@ def load_data():
         with open(MENU_FILE, 'r', encoding='utf-8') as f:
             MENU = json.load(f)
     else:
-        MENU ={
-    "آلفردو": 450,
-    "آناکاردی": 480,
-    "پینو": 480,
-    "بولونز": 450,
-    "ماتریچیانا": 520,
-    "گامبرتی (میگو)": 550,
-    "لازانیا": 580,
-    "پیتزا استیک گوشت": 690,
-    "پیتزا مرغ": 580,
-    "پیتزا پپرونی": 580,
-    "نوشابه": 60
-}
+        MENU = {
+            "آلفردو": 450,
+            "بولونز": 450,
+            "پیتزا مرغ": 580,
+            "پیتزا پپرونی": 580,
+            "لازانیا": 580,
+            "نوشابه": 50
+        }
         save_menu()
     
     # بارگذاری تنظیمات
@@ -67,6 +62,7 @@ def load_data():
     if os.path.exists(USERS_FILE):
         with open(USERS_FILE, 'r', encoding='utf-8') as f:
             users = json.load(f)
+            # تبدیل کلیدها به اینتجر و اطمینان از یکسان بودن فرمت
             users = {int(k): v for k, v in users.items()}
     else:
         users = {}
@@ -155,8 +151,10 @@ async def start(message: types.Message):
         await message.answer("👋 خوش آمدید مدیر!", reply_markup=kb)
         return
     
-    # اگر کاربر عادی است
-    if str(uid) in users or uid in users:
+    # بررسی وجود کاربر در دیتابیس
+    # توجه: uid را به اینتجر تبدیل می‌کنیم و با کلیدهای دیکشنری مقایسه می‌کنیم
+    if uid in users:
+        # کاربر قبلاً ثبت‌نام کرده است
         if uid not in carts:
             carts[uid] = {}
             save_carts()
@@ -165,12 +163,14 @@ async def start(message: types.Message):
         kb.add("🍽 منوی غذا", "📞 تماس با ما", "📷 اینستاگرام", "📊 وضعیت سفارش")
         await message.answer("🍝 به رستوران ROMA خوش آمدید", reply_markup=kb)
     else:
+        # کاربر جدید است - باید ثبت‌نام کند
         kb = ReplyKeyboardMarkup(resize_keyboard=True)
         button = KeyboardButton("📱 ارسال شماره", request_contact=True)
         kb.add(button)
         await message.answer(
             "🍝 به رستوران ROMA خوش آمدید\n"
-            "لطفاً برای ثبت‌نام شماره تماس خود را ارسال کنید",
+            "🔹 برای استفاده از ربات، لطفاً شماره تماس خود را ارسال کنید\n"
+            "🔸 این کار فقط یک بار انجام می‌شود",
             reply_markup=kb
         )
         await RegisterState.waiting_for_contact.set()
@@ -185,15 +185,23 @@ async def register(message: types.Message, state: FSMContext):
         await state.finish()
         return
     
+    # ذخیره اطلاعات کاربر
     users[uid] = {
+        "user_id": uid,  # ذخیره user_id برای اطمینان
         "name": message.from_user.full_name,
+        "username": message.from_user.username,
         "phone": message.contact.phone_number,
         "register_date": str(datetime.now()),
         "total_orders": 0,
-        "total_spent": 0
+        "total_spent": 0,
+        "first_seen": str(datetime.now()),
+        "last_seen": str(datetime.now())
     }
+    
+    # ایجاد سبد خرید
     carts[uid] = {}
     
+    # ذخیره در فایل
     save_users()
     save_carts()
     
@@ -201,7 +209,11 @@ async def register(message: types.Message, state: FSMContext):
 
     kb = ReplyKeyboardMarkup(resize_keyboard=True)
     kb.add("🍽 منوی غذا", "📞 تماس با ما", "📷 اینستاگرام", "📊 وضعیت سفارش")
-    await message.answer("✅ ثبت‌نام با موفقیت انجام شد", reply_markup=kb)
+    await message.answer(
+        "✅ ثبت‌نام با موفقیت انجام شد!\n\n"
+        "🍝 حالا می‌توانید از منوی غذا سفارش دهید",
+        reply_markup=kb
+    )
 
 # ===================== CONTACT =====================
 @dp.message_handler(lambda m: m.text == "📞 تماس با ما")
@@ -222,6 +234,11 @@ async def insta(message: types.Message):
 @dp.message_handler(lambda m: m.text == "📊 وضعیت سفارش")
 async def check_order_status(message: types.Message):
     uid = message.from_user.id
+    
+    # به‌روزرسانی آخرین بازدید کاربر
+    if uid in users:
+        users[uid]['last_seen'] = str(datetime.now())
+        save_users()
     
     if uid in orders:
         status_text = {
@@ -649,6 +666,15 @@ async def admin_users(call: CallbackQuery):
             if register_date == today:
                 new_users_today += 1
     
+    # کاربران آنلاین (آخرین بازدید در 24 ساعت اخیر)
+    online_users = 0
+    one_day_ago = datetime.now() - timedelta(days=1)
+    for uid, user in users.items():
+        if 'last_seen' in user:
+            last_seen = datetime.fromisoformat(user['last_seen'])
+            if last_seen > one_day_ago:
+                online_users += 1
+    
     # مجموع سفارشات کاربران
     total_orders = len([o for o in orders.values() if o.get('status') in ['delivered', 'paid', 'ready']])
     
@@ -656,6 +682,7 @@ async def admin_users(call: CallbackQuery):
         f"👥 آمار کاربران\n\n"
         f"📊 کل کاربران: {total_users}\n"
         f"🆕 کاربران جدید امروز: {new_users_today}\n"
+        f"🟢 کاربران آنلاین (24 ساعت): {online_users}\n"
         f"🛒 کاربران فعال: {len(active_users)}\n"
         f"📦 مجموع سفارشات: {total_orders}\n"
         f"💰 میانگین سفارش به ازای کاربر: {total_orders / total_users if total_users else 0:.1f}\n\n"
@@ -824,10 +851,15 @@ async def food_menu(message: types.Message):
         await admin_panel(message)
         return
     
-    # اگر کاربر عادی است
-    if str(uid) not in users and uid not in users:
+    # اگر کاربر عادی است - بررسی وجود در دیتابیس
+    if uid not in users:
         await start(message)
         return
+    
+    # به‌روزرسانی آخرین بازدید
+    if uid in users:
+        users[uid]['last_seen'] = str(datetime.now())
+        save_users()
     
     if uid not in carts:
         carts[uid] = {}
@@ -1588,7 +1620,7 @@ async def fallback(message: types.Message):
             "❌ دستور نامعتبر!\n"
             "لطفاً از دکمه‌های زیر استفاده کنید"
         )
-    elif str(uid) not in users and uid not in users:
+    elif uid not in users:
         await start(message)
     else:
         await message.answer(
